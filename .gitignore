@@ -1,1 +1,5 @@
-__pycache__
+__pycach
+  *.pth
+  *.wav
+  *.npy
+  benchmarks/results/

@@ -94,6 +94,8 @@ CUDA_VISIBLE_DEVICES=0 python uss/inference.py \
 
 ## 4. Train the USS system from scratch
 
+New to the training code? Read the [beginner training guide](docs/TRAINING_GUIDE.md) for the full data flow, tensor dimensions, CNN architecture, and configuration details.
+
 ### 4.0 Download dataset
 
 Download the AudioSet dataset from the internet. The total size of AudioSet is around 1.1 TB. For reproducibility, our downloaded dataset can be accessed at: link: [https://pan.baidu.com/s/13WnzI1XDSvqXZQTS-Kqujg](https://pan.baidu.com/s/13WnzI1XDSvqXZQTS-Kqujg), password: 0vc2. Users may only download the balanced set (10.36 Gb, 1% of the full set) to train a baseline system.
