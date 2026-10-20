@@ -1,30 +1,3 @@
-
-/
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Benchmark pi · PY
 """Gate 1 CPU benchmark for the Raspberry Pi 4: times ONE stage per process.
  
   --stage sed : Cnn14 audio tagging on one 2 s segment (the always-on stage).
@@ -224,4 +197,3 @@ with open(outdir / f"{tag}_runs.csv", "w", newline="") as f:
 print("\n" + json.dumps(summary, indent=2))
 print(f"Saved results/{tag}_runs.csv and _summary.json")
  
-Claude finished the response
