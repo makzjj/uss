@@ -4,7 +4,8 @@ Matches uss/inference.py:
   - same Cnn14 model and weights (uss.utils.load_pretrained_panns, ~/.cache/panns/Cnn14_mAP=0.431.pth)
   - same audio loading (librosa, 32 kHz, mono)
   - same 2-second pieces, last piece padded with silence (from the USS settings file)
-  - same "sound is present" cut-off: 0.2 (USS's at_threshold)
+  - same "sound is present" cut-off: 0.2 (USS's at_threshold, used in its class-id and
+    levels modes; USS asked by example does not use it)
   - USS decides piece by piece: it only separates a 2 s piece if the listener's
     score for the queried class reaches 0.2, and outputs silence otherwise.
     Here a clip counts as "sound present" if ANY piece reaches the cut-off,
@@ -32,7 +33,7 @@ from uss.config import panns_paths_dict
 from uss.utils import get_path, load_pretrained_panns, parse_yaml
 
 DEFAULT_CONFIG = "scripts/train_configs/ss_model=resunet30,querynet=at_soft,data=full.yaml"
-USS_THRESHOLD = 0.2  # at_threshold in uss/inference.py
+USS_THRESHOLD = 0.2  # at_threshold in uss/inference.py (class-id / levels mode only)
 EXTRA_CUTOFFS = [0.05, 0.1, 0.3, 0.5]
 
 
@@ -101,7 +102,7 @@ def main():
     for c in sorted([USS_THRESHOLD] + EXTRA_CUTOFFS):
         hits = sum(s >= c for s in pos)
         fa = sum(s >= c for s in neg)
-        tag = "  <- USS's own cut-off" if c == USS_THRESHOLD else ""
+        tag = "  <- same as USS's class-id mode" if c == USS_THRESHOLD else ""
         print(f"{c:>9} {hits:>5}/{len(pos):<4} {fa:>8}/{len(neg):<4}{tag}")
     print(f"\nPer-clip and per-piece scores saved to {out}")
 
