@@ -24,7 +24,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import numpy as np
+import numpy as  np
 import torch
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -35,7 +35,7 @@ from uss.utils import get_path, load_pretrained_panns, parse_yaml  # noqa: E402
 TA = "/home/zmak002/docker_share/test_audio"
 SOUNDS = {  # name: (USS class id, examples folder)
     "beeper": (319, f"{TA}/queries/beeper"),
-    "engine": (349, f"{TA}/queries/engine"),
+    "engine": (343, f"{TA}/queries/engine"),
     "jackhammer": (420, f"{TA}/queries/jackhammer"),
 }
 CONFIG = "scripts/train_configs/ss_model=resunet30,querynet=at_soft,data=full.yaml"

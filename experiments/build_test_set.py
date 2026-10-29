@@ -27,7 +27,7 @@ SR = 32000
 TA = "/home/zmak002/docker_share/test_audio"
 DEFAULT_TARGETS = {
     "beeper": f"{TA}/beeper.wav",
-    "engine": f"{TA}/engine2.wav",
+    "engine": f"{TA}/engine3.wav",
     "jackhammer": f"{TA}/mix_snr0/target.wav",
 }
 LEVEL_DBFS = -25.0
