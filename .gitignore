@@ -3,3 +3,14 @@ __pycach
   *.wav
   *.npy
   benchmarks/results/
+    results/
+  *.pth
+  *.ckpt
+  *.wav
+  *.flac
+  *.pdf
+  downloaded_checkpoints/
+  separated_results/
+  query_conditions/
+
+
