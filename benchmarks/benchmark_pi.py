@@ -54,6 +54,8 @@ p.add_argument("--sed_p95_ms", type=float, default=0.0,
                help="SED p95 from S1, added to the sep deadline (window fill + SED + k queries)")
 p.add_argument("--cool_to_c", type=float, default=60.0, help="wait until the SoC is below this before starting")
 p.add_argument("--ready_file", default="", help="touch this file once warm-up is done (used by S3)")
+p.add_argument("--pause_pid", type=int, default=0,
+               help="sed stage: pause this process (USS) while each SED window runs, resume after")
 p.add_argument("--allow_governor", action="store_true", help="run even if governor is not 'performance'")
 p.add_argument("--outdir", default="results")
 args = p.parse_args()
@@ -222,6 +224,26 @@ else:
             out = model(input_dict={"mixture": mix, "condition": c})["waveform"]  # includes STFT and iSTFT
         return out
 env["model_load_s"] = round(time.perf_counter() - t_load0, 2)
+
+# Take-turns mode: SED pauses USS while it works, so the two never share the memory system
+if args.stage == "sed" and args.pause_pid:
+    _plain_forward = forward
+
+    def forward():
+        global STOP
+        try:
+            os.kill(args.pause_pid, signal.SIGSTOP)
+        except ProcessLookupError:
+            STOP = True                         # USS has finished; stop after this window
+            return _plain_forward()
+        try:
+            return _plain_forward()
+        finally:
+            try:
+                os.kill(args.pause_pid, signal.SIGCONT)
+            except ProcessLookupError:
+                STOP = True
+    env["pause_pid"] = args.pause_pid
 env["params_millions"] = round(sum(t.numel() for t in model.parameters()) / 1e6, 2)
 env["rss_after_load_mb"] = round(rss_mb(), 1)
 
