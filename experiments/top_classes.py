@@ -23,7 +23,7 @@ from uss.utils import get_path, load_pretrained_panns, parse_yaml  # noqa: E402
 
 import librosa  # noqa: E402
 
-WATCH = {319: "Reversing beeps", 349: "Heavy engine", 420: "Jackhammer"}
+WATCH = {319: "Reversing beeps", 343: "Engine", 349: "Heavy engine", 420: "Jackhammer"}
 
 
 def class_names():
