@@ -21,6 +21,13 @@ The summary is broken down by condition (ebr0, ebr-5, overlap) for hits, and by 
 for false alarms: background only (bgonly), background + interferer (int), and clips that contain
 a DIFFERENT target sound (other target).
 
+For the event-level scorer (score_events.py) it also saves <out>_pieces.csv: the listener's
+score for every 2 s piece, plus its frame readout (one score per 0.32 s frame, used only to
+place the onset), for three versions of every clip:
+  before   the clip as it is
+  after    the USS output as written (native level)
+  after_lm the USS output scaled to the clip's RMS (level-matched), gain capped at +20 dB
+
 Usage (inside the container, from the uss folder):
   python experiments/run_gate1.py
 """
@@ -30,11 +37,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import librosa
 import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).parent))
-from detect_baseline import USS_THRESHOLD, piece_scores  # noqa: E402
+from detect_baseline import USS_THRESHOLD, check_frame_readout, piece_details  # noqa: E402
 from uss.config import panns_paths_dict  # noqa: E402
 from uss.utils import get_path, load_pretrained_panns, parse_yaml  # noqa: E402
 
@@ -45,6 +53,18 @@ SOUNDS = {  # name: (USS class id, examples folder)
     "jackhammer": (420, f"{TA}/queries/jackhammer"),
 }
 CONFIG = "scripts/train_configs/ss_model=resunet30,querynet=at_soft,data=full.yaml"
+LM_MAX_GAIN_DB = 20.0   # level matching never boosts the USS output by more than this
+
+
+def rms(x):
+    return float(np.sqrt(np.mean(x ** 2)))
+
+
+def level_match_gain_db(mix, sep):
+    """Gain (dB) that brings the USS output to the clip's RMS, capped at +LM_MAX_GAIN_DB."""
+    if rms(sep) == 0:
+        return LM_MAX_GAIN_DB
+    return min(20 * np.log10(rms(mix) / rms(sep)), LM_MAX_GAIN_DB)
 
 
 def uss_output_dir(test_set, clip):
@@ -73,8 +93,9 @@ def main():
                                   checkpoint_path=get_path(panns_paths_dict["Cnn14"]),
                                   freeze=True).to(device)
     model.eval()
+    check_frame_readout(model, piece_samples, device)
 
-    results = []
+    results, pieces = [], []
     for name, (class_id, qdir) in SOUNDS.items():
         print(f"\n=== {name} (class {class_id}) ===")
         for i, row in enumerate(clips, start=1):
@@ -85,14 +106,26 @@ def main():
                 subprocess.run(["uss", "-i", clip, "--queries_dir", qdir,
                                 "--output_dir", str(uss_output_dir(a.test_set, clip))],
                                check=True, stdout=subprocess.DEVNULL)
-            before = max(piece_scores(model, clip, class_id, sr, piece_samples, device))
-            after = max(piece_scores(model, str(sep), class_id, sr, piece_samples, device))
+            mix_audio, _ = librosa.load(path=clip, sr=sr, mono=True)
+            sep_audio, _ = librosa.load(path=str(sep), sr=sr, mono=True)
+            gain_db = level_match_gain_db(mix_audio, sep_audio)
+            versions = {"before": mix_audio, "after": sep_audio,
+                        "after_lm": sep_audio * 10 ** (gain_db / 20)}
+            best = {}
+            for version, audio in versions.items():
+                details = piece_details(model, audio, class_id, piece_samples, device)
+                best[version] = max(s for s, _ in details)
+                for k, (score, frames) in enumerate(details):
+                    pieces.append({"sound": name, "clip": Path(clip).name, "version": version, "piece": k,
+                                   "start_s": round(k * piece_samples / sr, 3), "score": round(score, 5),
+                                   "frames": " ".join(f"{v:.4f}" for v in frames)})
             results.append({"sound": name, "clip": Path(clip).name,
                             "has_sound": int(row["contains"] == name),
                             "contains": row["contains"],
                             "condition": row.get("condition", ""),
                             "snr_db": row.get("target_ebr_db", row.get("snr_db", "")),
-                            "score_before": round(before, 4), "score_after": round(after, 4)})
+                            "score_before": round(best["before"], 4), "score_after": round(best["after"], 4),
+                            "score_after_lm": round(best["after_lm"], 4), "lm_gain_db": round(gain_db, 2)})
 
     out = Path(a.out or f"results/{Path(a.test_set).name}_scores.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -100,6 +133,12 @@ def main():
         w = csv.DictWriter(fh, fieldnames=list(results[0].keys()))
         w.writeheader()
         w.writerows(results)
+    pieces_out = out.with_name(f"{out.stem}_pieces.csv")
+    with open(pieces_out, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(pieces[0].keys()))
+        w.writeheader()
+        w.writerows(pieces)
+    print(f"Per-piece scores (for score_events.py) saved to {pieces_out}")
 
     print(f"\nResults at the 0.2 cut-off (same value as USS's class-id mode; applied by the listener):")
     print(f"{'sound':12}{'hits before':>13}{'hits after':>12}{'false alarms before':>21}{'false alarms after':>20}")

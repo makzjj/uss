@@ -28,6 +28,7 @@ from pathlib import Path
 import librosa
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from uss.config import panns_paths_dict
 from uss.utils import get_path, load_pretrained_panns, parse_yaml
@@ -53,6 +54,59 @@ def piece_scores(model, path, class_id, sr, piece_samples, device):
         scores.append(prob)
         pointer += piece_samples
     return scores
+
+
+FRAME_S = 32 * 320 / 32000   # Cnn14 halves time 5 times after a 320-sample hop at 32 kHz -> 0.32 s per frame
+
+
+def cnn14_clip_and_frames(model, x):
+    """Cnn14 forward (eval mode) that also returns a frame-level readout.
+
+    Cnn14 has no framewise_output. Its clip score is fc_audioset(fc1(max_t + mean_t)) over the
+    last conv layer's time steps. Applying the same fc1 + fc_audioset to each time step on its own
+    (where max = mean = that step, so the input is 2 x step) gives one score per 0.32 s frame.
+    These frame scores are NOT calibrated like the clip score: use them only to place an onset
+    inside a piece, never to decide whether something was detected.
+
+    Returns clipwise (batch, classes), identical to model(x)["clipwise_output"],
+    and frames (batch, frames, classes).
+    """
+    h = model.logmel_extractor(model.spectrogram_extractor(x))
+    h = model.bn0(h.transpose(1, 3)).transpose(1, 3)
+    blocks = [model.conv_block1, model.conv_block2, model.conv_block3,
+              model.conv_block4, model.conv_block5, model.conv_block6]
+    for i, block in enumerate(blocks):
+        h = block(h, pool_size=(2, 2) if i < 5 else (1, 1), pool_type="avg")
+    h = torch.mean(h, dim=3)                                    # (batch, 2048, frames)
+    pooled = torch.max(h, dim=2)[0] + torch.mean(h, dim=2)
+    clipwise = torch.sigmoid(model.fc_audioset(F.relu(model.fc1(pooled))))
+    frames = torch.sigmoid(model.fc_audioset(F.relu(model.fc1(2 * h.transpose(1, 2)))))
+    return clipwise, frames
+
+
+def check_frame_readout(model, piece_samples, device):
+    """The manual forward must give exactly the model's own clip score."""
+    x = torch.randn(2, piece_samples, device=device) * 0.1
+    with torch.no_grad():
+        ref = model(input=x)["clipwise_output"]
+        clip, _ = cnn14_clip_and_frames(model, x)
+    if not torch.allclose(ref, clip, atol=1e-5):
+        raise SystemExit("Frame readout does not reproduce Cnn14's clipwise_output; check panns_inference version")
+
+
+def piece_details(model, audio, class_id, piece_samples, device):
+    """Like piece_scores, on audio already loaded: (clip score, frame scores) per 2 s piece."""
+    if len(audio) == 0:
+        raise SystemExit("Empty audio")
+    out = []
+    for pointer in range(0, len(audio), piece_samples):
+        piece = librosa.util.fix_length(
+            data=audio[pointer: pointer + piece_samples], size=piece_samples, axis=0)
+        x = torch.Tensor(piece).unsqueeze(0).to(device)
+        with torch.no_grad():
+            clip, frames = cnn14_clip_and_frames(model, x)
+        out.append((clip[0, class_id].item(), frames[0, :, class_id].cpu().numpy()))
+    return out
 
 
 def main():
