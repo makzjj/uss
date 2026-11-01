@@ -111,6 +111,14 @@ def get_throttled():
         return "n/a"
 
 
+def throttle_bits(s):
+    """'throttled=0x50005' -> 0x50005; None if vcgencmd is missing."""
+    try:
+        return int(s.split("=")[1], 16)
+    except (IndexError, ValueError):
+        return None
+
+
 def rss_mb():
     for line in open("/proc/self/status"):
         if line.startswith("VmRSS:"):
@@ -149,10 +157,12 @@ t_cool = time.perf_counter()
 while cpu_temp_c() > args.cool_to_c and time.perf_counter() - t_cool < 600:
     time.sleep(5)
 cool_wait = round(time.perf_counter() - t_cool, 1)
+cool_reached = cpu_temp_c() <= args.cool_to_c
 
 env = {
     "cool_to_c": args.cool_to_c,
     "cool_wait_s": cool_wait,
+    "cool_reached": cool_reached,
     "mem_available_before_mb": round(mem_available_mb(), 1),
     "timestamp": datetime.now().isoformat(timespec="seconds"),
     "model": read_sys("/proc/device-tree/model").rstrip("\x00"),
@@ -277,6 +287,15 @@ if not times:
     sys.exit("No timed runs completed.")
 t = np.array(times)
 throttled = get_throttled()
+
+
+def valid_run(before, after):
+    b, a = throttle_bits(before), throttle_bits(after)
+    if a is None:
+        return True                       # no vcgencmd: cannot tell
+    return (a & 0xF) == 0 and (a >> 16) == ((b or 0) >> 16)
+
+
 summary = {
     "runs_completed": len(times),
     "median_ms": round(float(np.median(t)) * 1000, 1),
@@ -291,7 +310,9 @@ summary = {
     "freq_min_mhz": min(freqs),
     "freq_max_mhz": max(freqs),
     "throttled_after": throttled,
-    "valid_run": throttled in ("throttled=0x0", "n/a"),
+    # bits 0-3 = throttling now; bits 16-19 = has happened since boot (sticky until reboot),
+    # so compare the sticky bits before and after instead of requiring 0x0
+    "valid_run": valid_run(env["throttled_before"], throttled),
     "mem_available_min_mb": round(min(mems), 1),
     "swap_after_mb": round(swap_used_mb(), 1),
 }

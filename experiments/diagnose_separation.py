@@ -1,7 +1,7 @@
 """Work out why a USS output scored badly.
  
 Checks:
-  1. Is the output closer to the jackhammer or to the background?
+  1. Is the output closer to the target or to the background?
   2. Is the output shifted in time compared with the target?
   3. How loud is the output compared with the target?
  
@@ -61,11 +61,11 @@ def main():
         est_aligned, tgt_aligned = est, tgt
  
     result = {
-        "1_si_sdr_vs_jackhammer_db": round(float(si_sdr(est, tgt)), 2),
+        "1_si_sdr_vs_target_db": round(float(si_sdr(est, tgt)), 2),
         "1_si_sdr_vs_background_db": round(float(si_sdr(est, bg)), 2),
         "2_best_time_shift_samples": best_lag,
         "2_best_time_shift_ms": round(best_lag / SR * 1000, 1),
-        "2_si_sdr_vs_jackhammer_after_shift_db": round(float(si_sdr(est_aligned, tgt_aligned)), 2),
+        "2_si_sdr_vs_target_after_shift_db": round(float(si_sdr(est_aligned, tgt_aligned)), 2),
         "3_output_loudness_db": round(float(rms_db(est)), 1),
         "3_target_loudness_db": round(float(rms_db(tgt)), 1),
     }

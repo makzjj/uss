@@ -19,7 +19,7 @@ Usage (inside the container, from the uss folder):
       --neg /path/without1.flac /path/without2.wav \
       --out results/detect_beeper.csv
 
-Class ids: 319 = Reversing beeps, 349 = Heavy engine, 420 = Jackhammer
+Class ids: 319 = Reversing beeps, 343 = Engine, 420 = Jackhammer (same as run_gate1.py)
 """
 import argparse
 import csv

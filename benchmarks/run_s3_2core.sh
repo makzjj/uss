@@ -12,6 +12,10 @@ if pgrep -f benchmark_pi.py > /dev/null; then
   echo "Another benchmark_pi.py is still running:"; pgrep -af benchmark_pi.py; exit 1
 fi
 
+if ! ls results/sed_t2_c01_sed2core_*_summary.json > /dev/null 2>&1; then
+  echo "== No 2-core SED baseline yet: running it (S1-style, no contention) =="
+  $PY benchmark_pi.py --stage sed --threads 2 --cpus 0,1 --tag sed2core
+fi
 SED2_P95=$($PY -c "import json,glob; f=sorted(glob.glob('results/sed_t2_c01_sed2core_*_summary.json'))[-1]; print(json.load(open(f))['p95_ms'])")
 echo "Using SED (2 cores) p95 = ${SED2_P95} ms"
 
@@ -19,7 +23,7 @@ rm -f s3_ready
 $PY benchmark_pi.py --stage sed --threads 2 --cpus 0,1 --pace_s 2.0 --repeats 100000 --warmup 2 \
     --ready_file s3_ready --tag s3bg_2core > s3_sed_bg_2core.log 2>&1 &
 SED_PID=$!
-for i in $(seq 1 120); do
+for i in $(seq 1 700); do          # SED may cool down first (up to 600 s)
   [ -f s3_ready ] && break
   kill -0 "$SED_PID" 2>/dev/null || { echo "Background SED died, see s3_sed_bg_2core.log"; exit 1; }
   sleep 1

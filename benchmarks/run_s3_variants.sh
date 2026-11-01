@@ -26,7 +26,7 @@ run_variant () {
   $PY benchmark_pi.py --stage sed --threads 1 --cpus 0 --pace_s 2.0 --repeats 100000 --warmup 2 \
       --ready_file s3_ready --tag s3bg_$NAME > s3_sed_bg_$NAME.log 2>&1 &
   SED_PID=$!
-  for i in $(seq 1 120); do
+  for i in $(seq 1 700); do          # SED may cool down first (up to 600 s)
     [ -f s3_ready ] && break
     kill -0 "$SED_PID" 2>/dev/null || { echo "Background SED died, see s3_sed_bg_$NAME.log"; exit 1; }
     sleep 1

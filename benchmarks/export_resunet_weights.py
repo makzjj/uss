@@ -10,7 +10,7 @@ import torch
 CKPT = Path.home() / ".cache/uss/checkpoints/ss_model=resunet30,querynet=at_soft,data=full,devices=8,step=1000000.ckpt"
 OUT = Path("resunet30_at_soft_fp32.pth")
  
-ckpt = torch.load(CKPT, map_location="cpu")          # torch 2.1 on the server: full unpickle is fine
+ckpt = torch.load(CKPT, map_location="cpu", weights_only=False)  # Lightning ckpt needs a full unpickle
 state = ckpt["state_dict"]
  
 # LitSeparation stores the separator as self.ss_model -> keys look like "ss_model.base...."
