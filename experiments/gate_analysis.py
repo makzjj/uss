@@ -25,7 +25,7 @@ thresholds and false alarms are identical to the Gate 1 report.
    the threshold still rises, while those already-detected pieces get no USS boost to stay
    above it. With --upper none, lo = 0 reproduces always-on USS exactly. Two query policies:
      k1   class-aware: query only the classes whose band fired (k = classes fired per job)
-     kmax recovery as defined in v0.3.6: any class firing launches a job querying all 3
+     kmax recovery as defined in v0.3.6: any class firing launches a job querying all gate classes (3 unless --exclude)
    For every lo: activation rate p (jobs / SED hops; hop = window = 2 s, so no merging),
    mean k, USS load p*k against the one-core budget, share of always-on fixes captured, and the
    gated pipeline re-matched at the same false alarms: delta recall, fixes, regressions.
@@ -53,7 +53,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
-from score_events import (CONDITIONS, evaluate, fuse, in_window, match,  # noqa: E402
+from score_events import (COLLAR_S, CONDITIONS, evaluate, fuse, in_window, match,  # noqa: E402
                           onset_time, unmatched_peaks)
 from detect_baseline import USS_THRESHOLD  # noqa: E402
 from run_gate1 import SOUNDS, TA  # noqa: E402
@@ -101,7 +101,7 @@ def gated(before, uss, gate):
 
 def overlapping(k, win):
     start = k * PIECE_S
-    return start < win[1] and start + PIECE_S > win[0] - 0.5
+    return start < win[1] and start + PIECE_S > win[0] - COLLAR_S
 
 
 def bin_label(x):
@@ -169,8 +169,11 @@ def main():
             conf = max(B[s][c][k][0] for k in range(len(B[s][c])) if overlapping(k, win))
             if kind == "fix":
                 for k, ((sb, _), (sa, ta)) in enumerate(zip(B[s][c], A[s][c])):
-                    if sa >= thr_a[s] and in_window(ta, win) and sb < thr_a[s]:
+                    if sa >= thr_a[s] and in_window(ta, win) and U[s][c][k][0] > sb:
                         fix_pieces[s].add((c, k))
+                if not any(cc == c for cc, _ in fix_pieces[s]):
+                    raise SystemExit(f"Fix event {s} {c} has no piece whose USS output made the hit; "
+                                     f"check matching before trusting this analysis")
             r = manifest[c]
             events.append({"class": s, "clip": c, "condition": r["condition"], "recording": r["target_source"],
                            "outcome": kind, "sed_conf": round(conf, 5), "conf_bin": bin_label(conf),
@@ -232,7 +235,7 @@ def main():
             ran = {s: hop_any if s in gate_classes else never for s in SOUNDS}
             queries = jobs * len(gate_classes)
         captured = sum(any(ran[s][c][k] for cc, k in fix_pieces[s] if cc == c)
-                       for s in SOUNDS for c in {cc for cc, _ in fix_pieces[s]})
+                       for s in gate_classes for c in {cc for cc, _ in fix_pieces[s]})
         dets = {s: gated(B[s], U[s], ran[s]) for s in SOUNDS}
         return jobs / n_hops, (queries / jobs if jobs else 0.0), captured, dets
 
@@ -253,7 +256,11 @@ def main():
                          sum(r["hb"] and not r["hg"] for r in rows if r["class"] == s)) for s in SOUNDS}
         return out, fixes, regs, per_class
 
-    n_fix_events = sum(1 for s in SOUNDS for _ in {c for c, _ in fix_pieces[s]})
+    fix_events = {s: {c for c, _ in fix_pieces[s]} for s in SOUNDS}
+    if sum(len(v) for v in fix_events.values()) != n_fix:
+        raise SystemExit("Fix counts disagree between sections 1 and 3; check fix-piece detection")
+    n_fix_events = sum(len(fix_events[s]) for s in gate_classes)
+    given_up = {s: len(fix_events[s]) for s in a.exclude if fix_events[s]}
     need = math.ceil(FIX_SHARE * n_fix_events) if n_fix_events else 0
     budget = USS_BUSY_MAX * PIECE_S / T_USS_S          # max p*k on the USS core
     los = sorted({0.0} | {round(x, 4) for x in np.geomspace(0.001, 0.2, 24)}
@@ -264,6 +271,9 @@ def main():
         + (" and < SED-only threshold (band)." if a.upper == "sed" else " (lo = 0 is always-on USS)."))
     say(f"   USS core budget: p * k <= {USS_BUSY_MAX} x {PIECE_S:g} s / {T_USS_S} s = {budget:.3f}. "
         f"Always-on fixes to capture: {n_fix_events} (80% = {need}).")
+    if given_up:
+        say("   Fixes given up by never gating " + ", ".join(f"{s} ({n})" for s, n in given_up.items())
+            + "; they are not in the 80% target.")
     say(f"   d = delta recall (pp) vs SED only, re-matched at the same false alarms; f/r = event fixes/regressions")
     sweep, by_policy = [], defaultdict(list)
     for policy in ("k1", "kmax"):
@@ -279,14 +289,18 @@ def main():
             row = {"policy": policy, "lo": lo, "p": round(p, 4), "k": round(k, 3), "load_pk": round(p * k, 4),
                    "within_budget": p * k <= budget, "fixes_captured": cap, "fixes_total": n_fix_events,
                    **{f"delta_{c}": round(d[c], 1) for c in CONDITIONS}, "fixes": fx, "regressions": rg,
+                   "fixes_gate_classes": sum(pc[s][0] for s in gate_classes),
                    **{f"fix_reg_{s}": f"{pc[s][0]}/{pc[s][1]}" for s in SOUNDS}}
             sweep.append(row)
             by_policy[policy].append((row, dets))
 
     # ---------- 4. p_min ----------
-    say(f"\n4. p_min = lowest p capturing >= {need} of {n_fix_events} always-on fixes (80%):")
-    oracle_hops = {(c, k) for s in SOUNDS for c, k in fix_pieces[s]}
-    oracle_q = sum(len(fix_pieces[s]) for s in SOUNDS)
+    say(f"\n4. p_min (v0.3.6 definition) = lowest p capturing >= {need} of {n_fix_events} always-on fixes (80%).")
+    say("   'Captured' means the fix piece was gated. The gated pipeline is then re-matched, so its own")
+    say("   fix count can differ; the lowest p at which the re-matched gate-class fixes reach the same")
+    say("   number is reported on the next line as a check, not as p_min:")
+    oracle_hops = {(c, k) for s in gate_classes for c, k in fix_pieces[s]}
+    oracle_q = sum(len(fix_pieces[s]) for s in gate_classes)
     say(f"   oracle (fires only on fix pieces): p = {len(oracle_hops) / n_hops:.4f} "
         f"({len(oracle_hops)} of {n_hops} hops), k = {oracle_q / max(len(oracle_hops), 1):.2f} at policy k1")
     pmin_rows = {}
@@ -301,6 +315,13 @@ def main():
             f"load p*k = {best['load_pk']:.4f} ({'within' if best['within_budget'] else 'OVER'} budget {budget:.3f}); "
             f"gated delta recall " + " / ".join(f"{best[f'delta_{c}']:+.1f}" for c in CONDITIONS)
             + f" pp, fixes/regressions {best['fixes']}/{best['regressions']}")
+        kept = [r for r, _ in rows if r["fixes_gate_classes"] >= need]
+        if kept:
+            chk = min(kept, key=lambda r: (r["p"], -r["lo"]))
+            say(f"      check: re-matched gate-class fixes >= {need} first at p = {chk['p']:.4f} "
+                f"(lo = {chk['lo']:.4f})" + ("  <- same setting" if chk is best else "  <- differs from p_min"))
+        else:
+            say(f"      check: re-matched gate-class fixes never reach {need} at any lo")
 
     # ---------- 5. random gating at the p_min setting ----------
     rng = np.random.default_rng(a.seed)
@@ -308,6 +329,9 @@ def main():
     for policy, best in pmin_rows.items():
         n_jobs = round(best["p"] * n_hops)
         if n_jobs == 0:
+            continue
+        if n_jobs >= n_hops:
+            say(f"\n5. Random gating at {policy} p_min skipped: p = 1 gates every hop, so random gating is identical.")
             continue
         deltas, frs = [], []
         for _ in range(a.random_trials):
@@ -326,7 +350,8 @@ def main():
         lo95, hi95 = np.percentile(deltas, [2.5, 97.5])
         say(f"\n5. Random gating at {policy} p_min ({n_jobs} random hops, {a.random_trials} trials): mean delta recall "
             f"{np.mean(deltas):+.1f} pp [95% of trials {lo95:+.1f}, {hi95:+.1f}]; confidence gate {gate_mean:+.1f} pp; "
-            f"confidence gate beats {100 * np.mean(np.array(deltas) < gate_mean):.0f}% of random trials")
+            f"confidence gate better in {100 * np.mean(np.array(deltas) < gate_mean):.0f}% of random trials, "
+            f"tied in {100 * np.mean(np.isclose(deltas, gate_mean)):.0f}%")
 
     say("\nLimits:")
     say(f"  - In-sample: thresholds, fixes, the band and p_min all come from the same dev set they are scored on.")
