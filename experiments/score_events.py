@@ -32,8 +32,21 @@ Gate 1 verdict (each USS pipeline vs before; ALL SOUNDS POOLED, per-sound result
 Separation (native USS output only: SI-SDR is scale-invariant, and leakage must be at native level)
   SI-SDR / SI-SDRi against events/<clip>_events/foreground*_<sound>.wav; for clips without that
   sound, output energy relative to the clip (leakage, dB).
+Diagnostics
+  What sets each threshold  the highest pieces that can never be a hit, one per clip, with their
+                            clip type. Clips are no longer than the 10 s merge window, so each clip
+                            holds at most one false alarm and the threshold sits just above the
+                            (allowed false alarms + 1)-th of these.
+  Regression causes         for each event regression: 'time moved' (still detected, but the event
+                            time taken from the USS output left the collar: a scoring artefact),
+                            'threshold rose' (a hit at the 'before' threshold), or 'score fell'.
+  False-alarm sweep         delta recall with every pipeline re-matched at 0, 1, 2, 5, 10 false alarms.
+  Perfect separation        if results/<set>_oracle_pieces.csv exists (run_oracle.py), the listener
+                            on the isolated targets (silence elsewhere) is scored as an upper bound.
+                            It is never a candidate for the fusion choice or the verdict.
 
-Writes to results/<set>_events/: thresholds.csv, gt_events.csv, false_alarms.csv, separation.csv, report.txt
+Writes to results/<set>_events/: thresholds.csv, threshold_setters.csv, gt_events.csv (with
+regression causes), false_alarms.csv, fa_sweep.csv, separation.csv, report.txt
 
 Usage (inside the container, from the uss folder, after run_gate1.py):
   python experiments/score_events.py                  # development set: chooses and freezes the fusion rule
@@ -62,11 +75,19 @@ PIPELINES = {  # name: (USS output version, fusion rule, label)
     "replace_lm": ("after_lm", "replace", "level-matched, replace"),
     "max_lm": ("after_lm", "max", "level-matched, max"),
 }
+ORACLE = {  # perfect separation (run_oracle.py): an upper bound, never a candidate
+    "oracle": ("oracle", "replace", "perfect separation, replace"),
+    "oracle_max": ("oracle", "max", "perfect separation, max"),
+}
 CONDITIONS = ["ebr0", "ebr-5", "overlap"]
 COLLAR_S = 0.5
 FA_MERGE_S = 10.0
 MIN_GAIN_PP = 5.0
 MIN_CONDITIONS = 2
+P2_FA_PER_HOUR = 1.0          # Requirements v0.3.5 P2: <= 1 false alarm per hour
+FA_BUDGETS = [0, 1, 2, 5, 10]
+N_SETTERS = 3
+CAUSES = ["time moved", "threshold rose", "threshold rose + time moved", "score fell"]
 
 lines = []
 
@@ -94,6 +115,10 @@ def fuse(before, uss, rule):
     return out
 
 
+def in_window(t, win):
+    return win[0] - COLLAR_S <= t <= win[1]
+
+
 def evaluate(dets, gt, thr):
     """dets: {clip: [(score, time)]} for one sound and pipeline; gt: {clip: (onset, offset)}.
     Returns ({gt clip: hit}, {clip: false alarms})."""
@@ -101,8 +126,7 @@ def evaluate(dets, gt, thr):
     for clip, ds in dets.items():
         times = sorted(t for s, t in ds if s >= thr)
         if clip in gt:
-            on, off = gt[clip]
-            inside = [on - COLLAR_S <= t <= off for t in times]
+            inside = [in_window(t, gt[clip]) for t in times]
             hits[clip] = any(inside)
             times = [t for t, m in zip(times, inside) if not m]
         fa, last = 0, None
@@ -125,6 +149,38 @@ def lowest_threshold(dets, gt, max_fa):
         else:
             lo = mid + 1
     return cands[lo]
+
+
+def match(dets, gt, max_fa):
+    """(threshold, hits, false alarms) at the lowest threshold with false alarms <= max_fa."""
+    thr = lowest_threshold(dets, gt, max_fa)
+    return (thr, *evaluate(dets, gt, thr))
+
+
+def unmatched_peaks(dets, gt):
+    """Per clip: (score, piece) of the highest piece that can never be a hit (event time outside
+    the GT window, or a clip without this sound). These are the false alarm candidates."""
+    out = {}
+    for clip, ds in dets.items():
+        cand = [(s, k) for k, (s, t) in enumerate(ds) if clip not in gt or not in_window(t, gt[clip])]
+        if cand:
+            out[clip] = max(cand)
+    return out
+
+
+def regression_cause(before, fused, win, thr_b, thr_p):
+    """Why an event hit 'before' is missed by a pipeline, from the pieces that gave the 'before' hit."""
+    found = set()
+    for (sb, tb), (sp, tp) in zip(before, fused):
+        if sb < thr_b or not in_window(tb, win):
+            continue
+        if sp >= thr_p:
+            found.add("time moved")              # detected, but not inside the collar any more
+        elif sp >= thr_b:
+            found.add("threshold rose" if in_window(tp, win) else "threshold rose + time moved")
+        else:
+            found.add("score fell")              # replace only: max never lowers a score
+    return next(c for c in CAUSES if c in found)
 
 
 def delta_table(events, pipelines):
@@ -162,6 +218,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--test_set", default=f"{TA}/testsets/gate1_v2")
     ap.add_argument("--pieces", default="", help="default: results/<set>_scores_pieces.csv")
+    ap.add_argument("--oracle_pieces", default="",
+                    help="default: results/<set>_oracle_pieces.csv (run_oracle.py); skipped if missing")
     ap.add_argument("--out_dir", default="", help="default: results/<set>_events")
     ap.add_argument("--fusion", choices=["auto"] + FUSIONS, default="auto",
                     help="auto = choose on this (development) set; afterwards always pass the frozen rule")
@@ -183,25 +241,42 @@ def main():
     clip_s = json.loads((ts / "settings.json").read_text())["duration_s"]
     hours = len(manifest) * clip_s / 3600     # every clip is scored for every sound
 
+    oracle_path = Path(a.oracle_pieces or f"results/{ts.name}_oracle_pieces.csv")
+    pipes = dict(PIPELINES)
+    versions, sources = list(VERSIONS), [pieces_path]
+    if oracle_path.exists():
+        pipes.update(ORACLE)
+        versions.append("oracle")
+        sources.append(oracle_path)
+
     # raw[(sound, version)][clip] = [(score, event time)] in piece order
     raw = defaultdict(lambda: defaultdict(dict))
-    with open(pieces_path) as fh:
-        for r in csv.DictReader(fh):
-            t = onset_time(float(r["start_s"]), r["frames"], a.onset_rel)
-            raw[(r["sound"], r["version"])][r["clip"]][int(r["piece"])] = (float(r["score"]), t)
+    starts = defaultdict(dict)                # starts[clip][piece] = piece start (s)
+    for path in sources:
+        with open(path) as fh:
+            for r in csv.DictReader(fh):
+                t = onset_time(float(r["start_s"]), r["frames"], a.onset_rel)
+                raw[(r["sound"], r["version"])][r["clip"]][int(r["piece"])] = (float(r["score"]), t)
+                starts[r["clip"]][int(r["piece"])] = float(r["start_s"])
     for s in SOUNDS:
-        for v in VERSIONS:
+        for v in versions:
             missing = set(manifest) - set(raw[(s, v)])
             if missing:
-                raise SystemExit(f"{pieces_path} has no '{v}' pieces for {s} on {len(missing)} clips "
-                                 f"(e.g. {sorted(missing)[0]}); rerun run_gate1.py")
+                raise SystemExit(f"No '{v}' pieces for {s} on {len(missing)} clips (e.g. {sorted(missing)[0]}); "
+                                 f"rerun {'run_oracle.py' if v == 'oracle' else 'run_gate1.py'}")
+    piece_s = min(st for ps in starts.values() for st in ps.values() if st > 0)
+    seq = {key: {c: [ps[k] for k in sorted(ps)] for c, ps in by_clip.items()} for key, by_clip in raw.items()}
     dets = {}
     for s in SOUNDS:
-        before = {c: [ps[k] for k in sorted(ps)] for c, ps in raw[(s, "before")].items()}
-        dets[(s, "before")] = before
-        for p, (version, rule, _) in PIPELINES.items():
-            uss = {c: [ps[k] for k in sorted(ps)] for c, ps in raw[(s, version)].items()}
-            dets[(s, p)] = fuse(before, uss, rule)
+        dets[(s, "before")] = seq[(s, "before")]
+        for p, (version, rule, _) in pipes.items():
+            dets[(s, p)] = fuse(seq[(s, "before")], seq[(s, version)], rule)
+    gts = {s: {c: (float(r["target_onset"]), float(r["target_offset"]))
+               for c, r in manifest.items() if r["contains"] == s} for s in SOUNDS}
+    names = ["before"] + list(pipes)
+
+    def label(p):
+        return pipes[p][2] if p in pipes else p
 
     def neg_group(s, clip):
         r = manifest[clip]
@@ -209,38 +284,68 @@ def main():
             return "same sound, outside event"
         return r["condition"] if r["contains"] == "none" else "other target"
 
+    def source(s, p, clip, k):
+        """Which audio gave a pipeline's score for this piece."""
+        if p == "before":
+            return "original"
+        version, rule, _ = pipes[p]
+        name = "isolated target" if version == "oracle" else "USS output"
+        if rule == "replace":
+            return name
+        return "original" if seq[(s, "before")][clip][k][0] >= seq[(s, version)][clip][k][0] else name
+
     # ---------- thresholds at matched false alarms ----------
     say(f"Event-level Gate 1 scorer: {ts.name}, {len(manifest)} clips of {clip_s:g} s "
         f"({hours * 60:.1f} min scored per sound)")
     say(f"Hit = event time in [onset - {COLLAR_S} s, offset]; false alarms merged within {FA_MERGE_S:g} s; "
         f"onset frame at {a.onset_rel} x piece max")
     say(f"\nThresholds matched to the 'before' false alarms at cut-off {a.anchor_threshold}:")
-    say(f"{'sound':12}{'pipeline':24}{'threshold':>10}{'false alarms':>14}{'per hour':>10}")
-    events, thr_rows, fa_rows = [], [], []
-    names = ["before"] + list(PIPELINES)
+    say(f"{'sound':12}{'pipeline':28}{'threshold':>10}{'false alarms':>14}{'per hour':>10}")
+    events, thr_rows, fa_rows, setter_rows = [], [], [], []
+    anchor_fa, res = {}, {}
     for s in SOUNDS:
-        gt = {c: (float(r["target_onset"]), float(r["target_offset"]))
-              for c, r in manifest.items() if r["contains"] == s}
-        anchor_fa = sum(evaluate(dets[(s, "before")], gt, a.anchor_threshold)[1].values())
-        hit, fas = {}, {}
+        gt = gts[s]
+        anchor_fa[s] = sum(evaluate(dets[(s, "before")], gt, a.anchor_threshold)[1].values())
+        res[s] = {p: match(dets[(s, p)], gt, anchor_fa[s]) for p in names}
         for p in names:
-            thr = lowest_threshold(dets[(s, p)], gt, anchor_fa)
-            hit[p], fas[p] = evaluate(dets[(s, p)], gt, thr)
-            fa = sum(fas[p].values())
-            label = PIPELINES[p][2] if p in PIPELINES else p
+            thr, _, fas = res[s][p]
+            fa = sum(fas.values())
             thr_rows.append({"sound": s, "pipeline": p, "threshold": round(thr, 5), "false_alarms": fa,
-                             "fa_per_hour": round(fa / hours, 1), "anchor_false_alarms": anchor_fa})
-            say(f"{s:12}{label:24}{thr:>10.4f}{fa:>14}{fa / hours:>10.1f}")
+                             "fa_per_hour": round(fa / hours, 1), "anchor_false_alarms": anchor_fa[s]})
+            say(f"{s:12}{label(p):28}{thr:>10.4f}{fa:>14}{fa / hours:>10.1f}")
+        thr_b, hit_b = res[s]["before"][:2]
         for c in gt:
             r = manifest[c]
+            causes = {f"cause_{p}": regression_cause(dets[(s, "before")][c], dets[(s, p)][c], gt[c],
+                                                     thr_b, res[s][p][0])
+                      if hit_b[c] and not res[s][p][1][c] else "" for p in pipes}
             events.append({"sound": s, "clip": c, "condition": r["condition"],
-                           "target_source": r["target_source"], **{f"hit_{p}": hit[p][c] for p in names}})
+                           "target_source": r["target_source"],
+                           **{f"hit_{p}": res[s][p][1][c] for p in names}, **causes})
         for c in manifest:
             fa_rows.append({"sound": s, "clip": c, "group": neg_group(s, c),
-                            **{f"fa_{p}": fas[p][c] for p in names}})
+                            **{f"fa_{p}": res[s][p][2][c] for p in names}})
+
+    # ---------- what sets each threshold ----------
+    say(f"\nWhat sets each threshold: the highest pieces that can never be a hit, one per clip "
+        f"(each clip holds at most one false alarm, so the threshold sits just above entry 'allowed + 1'):")
+    for s in SOUNDS:
+        gt = gts[s]
+        for p in names:
+            peaks = sorted(((sc, k, c) for c, (sc, k) in unmatched_peaks(dets[(s, p)], gt).items()), reverse=True)
+            say(f"  {s} / {label(p)}: threshold {res[s][p][0]:.4f}, {anchor_fa[s]} false alarms allowed")
+            for i, (sc, k, c) in enumerate(peaks[:anchor_fa[s] + N_SETTERS]):
+                st = starts[c][k]
+                drift = c in gt and st < gt[c][1] and st + piece_s > gt[c][0]
+                note = "; piece overlaps the event, onset placed outside the collar" if drift else ""
+                mark = "  <- threshold just above this" if i == anchor_fa[s] else ""
+                say(f"    {sc:.4f}  {c}  ({neg_group(s, c)}, piece {k}, from {source(s, p, c, k)}{note}){mark}")
+                setter_rows.append({"sound": s, "pipeline": p, "rank": i + 1, "score": sc, "clip": c,
+                                    "group": neg_group(s, c), "piece": k, "source": source(s, p, c, k),
+                                    "piece_overlaps_event": drift, "sets_threshold": i == anchor_fa[s]})
 
     # ---------- fusion rule: choose on this set, or use the frozen one ----------
-    table = delta_table(events, PIPELINES)
+    table = delta_table(events, pipes)
     mean_delta = {f: np.mean([r[f"delta_{p}"] for r in table.values()
                               for p, (_, rule, _) in PIPELINES.items() if rule == f]) for f in FUSIONS}
     if a.fusion == "auto":
@@ -255,11 +360,18 @@ def main():
         say(f"  Freeze it: pass --fusion {fusion} for every later run, including the held-out set.")
     frozen = [p for p, (_, rule, _) in PIPELINES.items() if rule == fusion]
 
+    def tag(p):
+        if p in frozen:
+            return "   <- frozen rule"
+        return "   (upper bound, not a candidate)" if p in ORACLE else ""
+
     # ---------- delta recall per condition (pooled) ----------
     say("\nRecall per condition (ALL SOUNDS POOLED, each sound at its own matched threshold); "
         "d = delta recall in pp, f/r = event fixes/regressions:")
-    for p, (_, _, label) in PIPELINES.items():
-        say(f"\n  {label}{'   <- frozen rule' if p in frozen else ''}")
+    if not oracle_path.exists():
+        say(f"  (no {oracle_path}: run run_oracle.py to add the perfect-separation upper bound)")
+    for p in pipes:
+        say(f"\n  {label(p)}{tag(p)}")
         say(f"    {'condition':10}{'n':>4}{'before':>8}{'after':>8}{'d':>8}{'f/r':>8}")
         for c, r in table.items():
             say(f"    {c:10}{r['n']:>4}{r['recall_before']:>8.2f}{r[f'recall_{p}']:>8.2f}"
@@ -267,15 +379,27 @@ def main():
 
     say("\nPer sound (delta recall in pp, event fixes/regressions); a sound that drops "
         "can be hidden by the pooled verdict:")
-    per_sound = {s: delta_table([e for e in events if e["sound"] == s], PIPELINES) for s in SOUNDS}
-    for p, (_, _, label) in PIPELINES.items():
-        say(f"  {label}{'   <- frozen rule' if p in frozen else ''}")
+    per_sound = {s: delta_table([e for e in events if e["sound"] == s], pipes) for s in SOUNDS}
+    for p in pipes:
+        say(f"  {label(p)}{tag(p)}")
         for s, t in per_sound.items():
             fx = sum(r[f"fixes_{p}"] for r in t.values())
             rg = sum(r[f"regressions_{p}"] for r in t.values())
             drop = "  <- drops" if any(r[f"delta_{p}"] < 0 for r in t.values()) else ""
             say(f"    {s:11} " + "  ".join(f"{c} {r[f'delta_{p}']:+5.0f}" for c, r in t.items())
                 + f"   fixes {fx}, regressions {rg}{drop}")
+
+    # ---------- causes of event regressions ----------
+    say("\nCauses of event regressions (a 'before' hit that the pipeline misses):")
+    say("  time moved = still detected, but the event time taken from the USS output left the collar "
+        "(a scoring artefact, not a USS failure)")
+    say("  threshold rose = would be a hit at the 'before' threshold;  score fell = below even that threshold")
+    for p in pipes:
+        say(f"  {label(p)}{tag(p)}")
+        for s in SOUNDS:
+            cs = [e[f"cause_{p}"] for e in events if e["sound"] == s and e[f"cause_{p}"]]
+            say(f"    {s:11} {len(cs):>3}" + (": " + ", ".join(f"{c} {cs.count(c)}" for c in CAUSES if c in cs)
+                                              if cs else ""))
 
     # ---------- false-alarm fixes / regressions ----------
     say("\nFalse alarms, frozen rule (fix = a false alarm removed, regression = one added; per clip and sound):")
@@ -310,9 +434,9 @@ def main():
 
     say(f"\nGate 1 verdict, ALL SOUNDS POOLED (delta recall >= +{MIN_GAIN_PP:g} pp in >= {MIN_CONDITIONS} of "
         f"{len(table)} conditions, and event fixes > event regressions):")
-    for p, (_, _, label) in PIPELINES.items():
+    for p in PIPELINES:
         ok, n_pass, fixes, regs = verdict(table, p)
-        say(f"\n  {label}{'   <- frozen rule' if p in frozen else '   (not the frozen rule; for reference)'}: "
+        say(f"\n  {label(p)}{'   <- frozen rule' if p in frozen else '   (not the frozen rule; for reference)'}: "
             f"{'PASS' if ok else 'FAIL'}  ({n_pass} conditions >= +{MIN_GAIN_PP:g} pp; "
             f"fixes {fixes}, regressions {regs})")
         for c, vals in boot[p].items():
@@ -323,6 +447,33 @@ def main():
                  for c, r in t.items() if r[f"delta_{p}"] < 0]
         if drops:
             say(f"    note: pooled over sounds; these drop: {', '.join(drops)}")
+
+    # ---------- false-alarm sweep ----------
+    p2_budget = int(hours * P2_FA_PER_HOUR)
+    say(f"\nFalse-alarm sweep: every pipeline (and 'before') re-matched to at most N false alarms per sound; "
+        f"pooled delta recall in pp (point estimates, no CI):")
+    say(f"  {'':30}" + "".join(f"{c:>9}" for c in table) + "   verdict")
+    sweep_rows = []
+    for budget in FA_BUDGETS:
+        ev = []
+        for s in SOUNDS:
+            r = {p: match(dets[(s, p)], gts[s], budget) for p in names}
+            ev += [{"condition": manifest[c]["condition"], **{f"hit_{p}": r[p][1][c] for p in names}}
+                   for c in gts[s]]
+        t = delta_table(ev, pipes)
+        p2 = f"   <- P2 (<= {P2_FA_PER_HOUR:g} per hour) on {hours * 60:.0f} min" if budget == p2_budget else ""
+        say(f"  <= {budget} false alarms ({budget / hours:.1f} per hour){p2}")
+        say(f"    {'before recall':28}" + "".join(f"{r['recall_before']:>9.2f}" for r in t.values()))
+        for p in pipes:
+            ok = verdict(t, p)[0]
+            say(f"    {label(p):28}" + "".join(f"{r[f'delta_{p}']:>+9.1f}" for r in t.values())
+                + f"   {'PASS' if ok else 'FAIL'}{'' if p not in ORACLE else ' (upper bound)'}")
+            for c, r in t.items():
+                sweep_rows.append({"max_false_alarms": budget, "fa_per_hour": round(budget / hours, 1),
+                                   "pipeline": p, "condition": c, "recall_before": round(r["recall_before"], 4),
+                                   "recall": round(r[f"recall_{p}"], 4), "delta_pp": round(r[f"delta_{p}"], 1),
+                                   "fixes": r[f"fixes_{p}"], "regressions": r[f"regressions_{p}"],
+                                   "verdict": "PASS" if ok else "FAIL"})
 
     # ---------- separation ----------
     sep_rows = []
@@ -364,7 +515,9 @@ def main():
     n_neg = sum(r["contains"] == "none" for r in manifest.values())
     say("\nLimits:")
     say(f"  - Target-absent clips: {n_neg} ({n_neg * clip_s / 60:.1f} min). False alarms per hour use all "
-        f"{hours * 60:.1f} min scored per sound, so one false alarm = {1 / hours:.0f} per hour: a coarse scale.")
+        f"{hours * 60:.1f} min scored per sound, so one false alarm = {1 / hours:.1f} per hour: a coarse scale.")
+    say(f"    P2 (<= {P2_FA_PER_HOUR:g} per hour) therefore allows {p2_budget} false alarms here; with 0 allowed, "
+        f"each threshold is set by a single clip (see 'What sets each threshold').")
     say("  - Recordings per sound: " + ", ".join(f"{s} {len(rs)}" for s, rs in recs.items())
         + ". Few recordings give wide confidence intervals.")
     say("  - Thresholds and the fusion rule are chosen and evaluated on the same development set (in-sample).")
@@ -380,11 +533,14 @@ def main():
                 w.writerows(rows)
 
     write("thresholds.csv", thr_rows)
+    write("threshold_setters.csv", setter_rows)
     write("gt_events.csv", events)
     write("false_alarms.csv", fa_rows)
+    write("fa_sweep.csv", sweep_rows)
     write("separation.csv", sep_rows)
     (out_dir / "report.txt").write_text("\n".join(lines) + "\n")
-    print(f"\nSaved thresholds.csv, gt_events.csv, false_alarms.csv, separation.csv, report.txt in {out_dir}")
+    print(f"\nSaved thresholds.csv, threshold_setters.csv, gt_events.csv, false_alarms.csv, fa_sweep.csv, "
+          f"separation.csv, report.txt in {out_dir}")
 
 
 if __name__ == "__main__":
