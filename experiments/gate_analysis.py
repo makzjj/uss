@@ -32,6 +32,10 @@ thresholds and false alarms are identical to the Gate 1 report.
 4. p_min = lowest p capturing >= 80% of always-on fixes (v0.3.6 method), for the real gate and
    for the oracle (gate fires only on the pieces that give the fixes).
 5. Random gating at the p_min setting (same p and k, random hops): R3 groundwork.
+6. USS load on target-free clips only (background only, background + interferer). The dev set is
+   mostly target clips, so p on all clips overstates how often the gate fires on ordinary street
+   audio. The target-free load is the closer estimate of everyday cost; bursts during real
+   target events come on top of it and are handled by the queue rules.
 
 Caveats printed in the report: everything is in-sample on the dev set; fix counts are tiny;
 the dev set is target-rich, so p here is higher than it would be on ordinary street audio.
@@ -136,6 +140,10 @@ def main():
     clips = sorted(manifest)
     n_hops = sum(len(seq[(next(iter(SOUNDS)), "before")][c]) for c in clips)
     gate_classes = [s for s in SOUNDS if s not in a.exclude]
+    free = [c for c in clips if manifest[c]["contains"] == "none"]
+    n_free_hops = sum(len(seq[(next(iter(SOUNDS)), "before")][c]) for c in free)
+    if not n_free_hops:
+        raise SystemExit("No target-free clips in the manifest")
 
     def group(s, c):
         r = manifest[c]
@@ -236,8 +244,9 @@ def main():
             queries = jobs * len(gate_classes)
         captured = sum(any(ran[s][c][k] for cc, k in fix_pieces[s] if cc == c)
                        for s in gate_classes for c in {cc for cc, _ in fix_pieces[s]})
+        q_free = sum(sum(sum(ran[s][c]) for c in free) for s in gate_classes)
         dets = {s: gated(B[s], U[s], ran[s]) for s in SOUNDS}
-        return jobs / n_hops, (queries / jobs if jobs else 0.0), captured, dets
+        return jobs / n_hops, (queries / jobs if jobs else 0.0), captured, dets, q_free / n_free_hops
 
     def score(dets):
         """Re-matched at the same allowed false alarms: per condition delta recall, fixes, regressions."""
@@ -278,16 +287,19 @@ def main():
     sweep, by_policy = [], defaultdict(list)
     for policy in ("k1", "kmax"):
         say(f"\n   policy {policy} ({'query only classes whose gate fired' if policy == 'k1' else 'query all gate classes'}):")
-        say(f"   {'lo':>9}{'p':>8}{'k':>6}{'p*k':>8}{'budget':>8}{'fixes cap':>11}"
+        say(f"   {'lo':>9}{'p':>8}{'k':>6}{'p*k':>8}{'budget':>8}{'p*k free':>10}{'budget':>8}{'fixes cap':>11}"
             + "".join(f"{'d ' + c:>11}" for c in CONDITIONS) + f"{'f/r':>8}")
         for lo in los:
-            p, k, cap, dets = run_gate(gate_masks(lo), policy)
+            p, k, cap, dets, lf = run_gate(gate_masks(lo), policy)
             d, fx, rg, pc = score(dets)
             ok = "ok" if p * k <= budget else "OVER"
-            say(f"   {lo:>9.5f}{p:>8.3f}{k:>6.2f}{p * k:>8.3f}{ok:>8}{cap:>6}/{n_fix_events:<4}"
+            okf = "ok" if lf <= budget else "OVER"
+            say(f"   {lo:>9.5f}{p:>8.3f}{k:>6.2f}{p * k:>8.3f}{ok:>8}{lf:>10.3f}{okf:>8}{cap:>6}/{n_fix_events:<4}"
                 + "".join(f"{d[c]:>+11.1f}" for c in CONDITIONS) + f"{fx:>5}/{rg:<3}")
             row = {"policy": policy, "lo": lo, "p": round(p, 4), "k": round(k, 3), "load_pk": round(p * k, 4),
-                   "within_budget": p * k <= budget, "fixes_captured": cap, "fixes_total": n_fix_events,
+                   "within_budget": p * k <= budget, "load_pk_target_free": round(lf, 4),
+                   "target_free_within_budget": lf <= budget,
+                   "fixes_captured": cap, "fixes_total": n_fix_events,
                    **{f"delta_{c}": round(d[c], 1) for c in CONDITIONS}, "fixes": fx, "regressions": rg,
                    "fixes_gate_classes": sum(pc[s][0] for s in gate_classes),
                    **{f"fix_reg_{s}": f"{pc[s][0]}/{pc[s][1]}" for s in SOUNDS}}
@@ -342,7 +354,7 @@ def main():
                 m = len(gate_classes) if policy == "kmax" else max(1, base + (rng.random() < frac))
                 for s in rng.choice(gate_classes, size=min(m, len(gate_classes)), replace=False):
                     fired[s][c][k] = True
-            _, _, _, dets = run_gate(fired, policy)
+            _, _, _, dets, _ = run_gate(fired, policy)
             d, fx, rg, _ = score(dets)
             deltas.append(np.mean([d[c] for c in CONDITIONS]))
             frs.append(fx - rg)
@@ -352,6 +364,28 @@ def main():
             f"{np.mean(deltas):+.1f} pp [95% of trials {lo95:+.1f}, {hi95:+.1f}]; confidence gate {gate_mean:+.1f} pp; "
             f"confidence gate better in {100 * np.mean(np.array(deltas) < gate_mean):.0f}% of random trials, "
             f"tied in {100 * np.mean(np.isclose(deltas, gate_mean)):.0f}%")
+
+    say(f"\n6. USS load on target-free clips only ({len(free)} clips, {n_free_hops} hops, "
+        f"{n_free_hops * PIECE_S / 60:.1f} min), budget {budget:.3f}:")
+    for policy, rows in by_policy.items():
+        r_list = [r for r, _ in rows]
+        if policy in pmin_rows:
+            b = pmin_rows[policy]
+            say(f"   {policy}: at p_min (lo = {b['lo']:.4f}) load on all clips {b['load_pk']:.3f}, "
+                f"on target-free clips {b['load_pk_target_free']:.3f} "
+                f"({'within' if b['target_free_within_budget'] else 'OVER'} budget, "
+                f"{b['load_pk_target_free'] / budget:.1f}x)")
+        fits = [r for r in r_list if r["target_free_within_budget"]]
+        if fits:
+            f0 = min(fits, key=lambda r: r["lo"])
+            say(f"   {policy}: lowest lo whose target-free load fits: lo = {f0['lo']:.4f}, load {f0['load_pk_target_free']:.3f}; "
+                f"there it captures {f0['fixes_captured']}/{f0['fixes_total']} fixes, delta recall "
+                + " / ".join(f"{f0[f'delta_{c}']:+.1f}" for c in CONDITIONS)
+                + f" pp, fixes/regressions {f0['fixes']}/{f0['regressions']}")
+        else:
+            say(f"   {policy}: no lo in the sweep keeps the target-free load within budget")
+    say(f"   Target-free audio here is dev backgrounds with interferers; {n_free_hops * PIECE_S / 60:.1f} min is short,")
+    say("   so treat these loads as rough. Field audio (Sem 2) gives the real figure.")
 
     say("\nLimits:")
     say(f"  - In-sample: thresholds, fixes, the band and p_min all come from the same dev set they are scored on.")
