@@ -218,6 +218,13 @@ def main():
         print(f"   wrote {out} ({out.stat().st_size / 1e6:.1f} MB, from {Path(a.fp32).stat().st_size / 1e6:.1f} MB) "
               f"in {t_q / 60:.1f} min")
 
+    import hashlib
+    h = hashlib.sha256()
+    with open(out, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    int8_sha = h.hexdigest()
+    print(f"   {out} sha256 {int8_sha} (matches onnx_sha256 in the Pi benchmark summaries)")
     layers, keep_fp32 = int8_layers(out, a.keep_fp32)
     print("   heavy layers: " + ", ".join(f"{k} {v}" for k, v in sorted(layers.items())))
     print(f"   checked: all {len(keep_fp32)} nodes meant to stay FP32 did (STFT, inverse STFT"
@@ -298,7 +305,7 @@ def main():
     print(f"   server CPU, {a.threads} threads, total separation time on target clips (NOT a Pi result): "
           f"FP32 {t_fp:.0f} s, INT8 {t_q8:.0f} s")
 
-    report = {"fp32": a.fp32, "int8": str(out), "calibration": a.calibration, "ops": a.ops,
+    report = {"fp32": a.fp32, "int8": str(out), "int8_sha256": int8_sha, "calibration": a.calibration, "ops": a.ops,
               "keep_fp32_modules": a.keep_fp32, "o1_sisdr_median_loss_db": round(float(np.median(deg)), 3),
               "calibration_clips": [Path(r["clip"]).name for r in calib], "fp32_nodes_kept": keep_fp32, "heavy_layers": layers,
               "quantize_minutes": round(t_q / 60, 1), "o1_sisdr_mean_loss_db": round(mean_deg, 3),

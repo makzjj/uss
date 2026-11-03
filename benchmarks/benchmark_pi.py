@@ -18,6 +18,16 @@ Examples (fresh process each time):
   python benchmark_pi.py --stage sep --threads 4                    # S1 (USS, k=1)
   python benchmark_pi.py --stage sep --threads 4 --k 3              # S2
   # S3 (contention): see run_week5_pi.sh
+  # Week 7, ONNX Runtime separator (same timing harness):
+  python benchmark_pi.py --stage sep --backend onnx --onnx resunet30_at_soft_fp32.onnx \
+      --conditions_dir query_conditions --threads 1 --cpus 3
+  # see run_week7_pi.sh
+
+ONNX notes: torch is still imported (the harness uses it), so peak_rss_mb overstates an ONNX-only
+deployment; rss_before_onnx_session_mb is recorded so it can be subtracted. ONNX threads do not
+spin while idle (right for the shared S3 layout); at 4 threads alone this adds a little wake-up
+delay that PyTorch's threads do not have. precision is read from the file name; onnx_sha256 is
+the reliable link to the int8_check.py report.
 """
 import argparse
 import csv
@@ -58,6 +68,12 @@ p.add_argument("--pause_pid", type=int, default=0,
                help="sed stage: pause this process (USS) while each SED window runs, resume after")
 p.add_argument("--allow_governor", action="store_true", help="run even if governor is not 'performance'")
 p.add_argument("--outdir", default="results")
+p.add_argument("--backend", choices=["torch", "onnx"], default="torch", help="separator backend (sep stage)")
+p.add_argument("--onnx", default="resunet30_at_soft_fp32.onnx", help="ONNX file for --backend onnx")
+p.add_argument("--save_optimized", default="",
+               help="ONNX only: save ONNX Runtime's optimized graph here (shows which INT8 ops really run)")
+p.add_argument("--conditions_dir", default="",
+               help="cached query conditions (<sound>.npy from cache_queries.py); default: one-hot as in Week 5")
 args = p.parse_args()
 
 # Pin to cores BEFORE torch starts its thread pool.
@@ -214,25 +230,58 @@ if args.stage == "sed":
     def forward():
         return model(x)["clipwise_output"]      # includes log-mel front end
 else:
-    sys.path.insert(0, args.repo)
-    from uss.models.resunet import ResUNet30
-    model = ResUNet30(input_channels=1, output_channels=1, condition_size=527)
-    model.load_state_dict(torch.load(args.sep_weights, map_location="cpu", weights_only=True))
-    model.eval()
-    base = np.load(args.condition).astype(np.float32).reshape(527)
+    model = None
+    if args.backend == "torch":                 # ONNX runs never load the PyTorch model (keeps peak RAM honest)
+        sys.path.insert(0, args.repo)
+        from uss.models.resunet import ResUNet30
+        model = ResUNet30(input_channels=1, output_channels=1, condition_size=527)
+        model.load_state_dict(torch.load(args.sep_weights, map_location="cpu", weights_only=True))
+        model.eval()
     conds = []
+    names = {343: "engine", 319: "beeper", 420: "jackhammer"}
     for j in range(args.k):
-        c = np.zeros(527, dtype=np.float32)
         cid = args.class_ids[j % len(args.class_ids)]
-        c[cid] = max(float(base.max()), 0.5)   # one target class per query
+        if args.conditions_dir:                 # real cached query condition for that class
+            c = np.load(Path(args.conditions_dir) / f"{names[cid]}.npy").astype(np.float32).reshape(527)
+        else:                                   # Week 5: one target class per query
+            base = np.load(args.condition).astype(np.float32).reshape(527)
+            c = np.zeros(527, dtype=np.float32)
+            c[cid] = max(float(base.max()), 0.5)
         conds.append(torch.from_numpy(c).reshape(1, 527))
     mix = x.unsqueeze(1)                        # (1, 1, 64000)
 
-    def forward():
-        out = None
-        for c in conds:                         # k serial queries = one job
-            out = model(input_dict={"mixture": mix, "condition": c})["waveform"]  # includes STFT and iSTFT
-        return out
+    if args.backend == "torch":
+        def forward():
+            out = None
+            for c in conds:                     # k serial queries = one job
+                out = model(input_dict={"mixture": mix, "condition": c})["waveform"]  # includes STFT and iSTFT
+            return out
+    else:
+        import onnxruntime as ort
+        so = ort.SessionOptions()
+        so.intra_op_num_threads = args.threads
+        so.inter_op_num_threads = 1
+        so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        so.add_session_config_entry("session.intra_op.allow_spinning", "0")   # idle threads sleep, not spin
+        if args.save_optimized:
+            so.optimized_model_filepath = args.save_optimized
+        env["rss_before_onnx_session_mb"] = round(rss_mb(), 1)   # torch is imported anyway; subtract this
+        sess = ort.InferenceSession(args.onnx, so, providers=["CPUExecutionProvider"])
+        mix_np = mix.numpy()
+        conds_np = [c.numpy() for c in conds]
+
+        def forward():
+            out = None
+            for c in conds_np:                  # k serial queries = one job
+                out = sess.run(["waveform"], {"mixture": mix_np, "condition": c})[0]
+            return out
+        env["onnxruntime"] = ort.__version__
+        env["onnx_file"] = args.onnx
+        h = __import__("hashlib").sha256()
+        with open(args.onnx, "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                h.update(block)
+        env["onnx_sha256"] = h.hexdigest()
 env["model_load_s"] = round(time.perf_counter() - t_load0, 2)
 
 # Take-turns mode: SED pauses USS while it works, so the two never share the memory system
@@ -254,7 +303,12 @@ if args.stage == "sed" and args.pause_pid:
             except ProcessLookupError:
                 STOP = True
     env["pause_pid"] = args.pause_pid
-env["params_millions"] = round(sum(t.numel() for t in model.parameters()) / 1e6, 2)
+env["params_millions"] = (round(sum(t.numel() for t in model.parameters()) / 1e6, 2) if model is not None
+                          else None)
+env["backend"] = args.backend if args.stage == "sep" else "torch"
+env["precision"] = ("int8" if args.stage == "sep" and args.backend == "onnx" and "int8" in Path(args.onnx).name
+                    else "fp32")
+env["conditions"] = args.conditions_dir or "one-hot (Week 5)"
 env["rss_after_load_mb"] = round(rss_mb(), 1)
 
 # ---------- warm-up, then timed runs ----------
@@ -346,7 +400,10 @@ outdir.mkdir(exist_ok=True)
 ktag = f"_k{args.k}" if args.stage == "sep" else ""
 cpus = f"_c{args.cpus.replace(',', '')}" if args.cpus else ""
 extra = f"_{args.tag}" if args.tag else ""
-tag = f"{args.stage}{ktag}_t{args.threads}{cpus}{extra}_{datetime.now():%Y%m%d-%H%M%S}"
+btag = ""
+if args.stage == "sep" and args.backend == "onnx":
+    btag = "_onnx-" + ("int8" if "int8" in Path(args.onnx).name else "fp32")
+tag = f"{args.stage}{btag}{ktag}_t{args.threads}{cpus}{extra}_{datetime.now():%Y%m%d-%H%M%S}"
 with open(outdir / f"{tag}_runs.csv", "w", newline="") as f:
     w = csv.writer(f)
     w.writerow(["run", "latency_ms", "cpu_temp_c", "freq_mhz", "mem_available_mb"])

@@ -62,7 +62,13 @@ def main():
     ap.add_argument("--lead", nargs=3, metavar=("POLICY", "LO", "EXCLUDE"), default=["kmax", "0.1002", "beeper"],
                     help="lead setting; EXCLUDE is a comma list or 'none'")
     ap.add_argument("--onset_rel", type=float, default=0.5)
+    ap.add_argument("--out", default="", help="JSON report; default results/o1_frozen_<int8 tag>.json")
     a = ap.parse_args()
+    tag = Path(a.int8_pieces).stem.replace("_scores_pieces", "").replace(Path(a.test_set).name + "_", "")  # int8_v2
+    out_path = Path(a.out or f"results/o1_frozen_{tag}.json")
+    report = {"int8_pieces": a.int8_pieces, "fp32_pieces": a.fp32_pieces, "int8_report": a.int8_report,
+              "calibration_clips_excluded": not a.include_calib, "o1_recall_limit_pp": O1_RECALL_PP,
+              "settings": []}
 
     ts = Path(a.test_set)
     manifest, fp, gts = load(ts, Path(a.fp32_pieces), a.onset_rel)
@@ -140,7 +146,21 @@ def main():
                   f"   re-matched INT8 threshold {thr_r:.4f}")
         if title.startswith("always-on"):
             verdict &= loss <= O1_RECALL_PP and fa_ok
+        report["settings"].append({
+            "setting": title, "recall_loss_pp": round(float(loss), 2), "events": len(rows),
+            "events_changed": int(changed),
+            "recall_fp32_pct": round(float(rec(rows, "fp")), 2), "recall_int8_pct": round(float(rec(rows, "q8")), 2),
+            "recall_met": bool(loss <= O1_RECALL_PP), "false_alarms_met": bool(fa_ok),
+            "false_alarms": [{"class": s_, "allowed": int(al), "fp32": int(nf), "int8": int(nq),
+                              "frozen_threshold": round(float(t_), 5), "rematched_int8_threshold": round(float(tr), 5)}
+                             for s_, al, nf, nq, t_, tr in fa_rows]})
     print(f"\nO1 recall + false alarms (always-on USS, frozen thresholds): {'MET' if verdict else 'NOT MET'}")
+    if a.int8_report and Path(a.int8_report).exists():
+        report["int8_sha256"] = json.loads(Path(a.int8_report).read_text()).get("int8_sha256")
+    report["o1_verdict_always_on"] = bool(verdict)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(report, indent=2))
+    print(f"Saved {out_path}")
     print(f"The upper bounds show why {hours * 60:.1f} min cannot validate P2 (1 FP/h); the P2 check is the >= 3 h set.")
     sys.exit(0 if verdict else 1)
 
