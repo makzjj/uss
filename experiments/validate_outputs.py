@@ -9,8 +9,16 @@ looking at any result:
   other target class scores higher than s on this scale, REJECT the USS evidence for that window:
   the window keeps its original SED score. Otherwise ACCEPT it (max rule as before).
 
-No tuned parameter, so the 7 dev fixes cannot be memorised. Validation changes accuracy, not
-compute: USS still has to run before its output can be checked.
+No parameter is tuned on the outcome, so the 7 dev fixes cannot be memorised; the per-class scale
+does come from the dev-set SED-only thresholds. Main assumption: those thresholds were set on the
+ORIGINAL audio, but the rule is applied to USS outputs, which score higher across the board on
+clips without the target. Dividing by the always-on thresholds would be the obvious alternative;
+it is not tried here, because choosing between the two after seeing results would be tuning.
+Expected side effect: jackhammer's threshold is tiny (about 0.03 vs 0.10-0.18), so its scaled
+score is inflated on every output; the rule may therefore reject ENGINE outputs on real engine
+windows. Read the real-target rejection column for engine first.
+
+Validation changes accuracy, not compute: USS still has to run before its output can be checked.
 
 Part 1 (GPU, minutes): re-score every saved Gate 1 USS output (uss_outputs/<clip>/query=<sound>)
 for all three target classes, using detect_baseline.cnn14_clip_and_frames exactly as run_gate1.py
@@ -24,6 +32,7 @@ which always-on fixes survive and regressions disappear, and how often validatio
 the windows that actually contain the queried target (the main cost of the check).
 
 In-sample on the dev set, and few events: a lead to confirm on held-out recordings, not a result.
+The lead-gate rows are in-sample twice: the lead setting was itself chosen on these clips.
 
 Usage (inside the container, from the uss folder):
   python experiments/validate_outputs.py
@@ -37,7 +46,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
-from gate_analysis import gated, load  # noqa: E402
+from gate_analysis import gated, load, overlapping  # noqa: E402
 from score_events import CONDITIONS, evaluate, fuse, match  # noqa: E402
 from detect_baseline import USS_THRESHOLD  # noqa: E402
 from run_gate1 import SOUNDS, TA, uss_output  # noqa: E402
@@ -109,6 +118,11 @@ def main():
             cross[(r["clip"], r["query"], int(r["piece"]))][r["class"]] = float(r["score"])
     B = {s: seq[(s, "before")] for s in NAMES}
     U = {s: seq[(s, "after")] for s in NAMES}
+    missing = [(c, s, k) for s in NAMES for c in clips for k in range(len(U[s][c]))
+               if set(cross.get((c, s, k), {})) != set(NAMES)]
+    if missing:
+        sys.exit(f"{cross_path} lacks {len(missing)} (clip, query, piece) entries, e.g. {missing[0]}; "
+                 f"it may be from another test set. Run again with --rescore.")
     worst = max(abs(cross[(c, s, k)][s] - U[s][c][k][0]) for s in NAMES for c in clips for k in range(len(U[s][c])))
     print(f"Check: re-scored queried-class score vs Gate 1 saved score, max difference {worst:.1e}"
           + ("" if worst < 1e-3 else "  <- does not match Gate 1; stopping"))
@@ -121,21 +135,22 @@ def main():
     accept = {s: {c: [max(cross[(c, s, k)][o] / thr_b[o] for o in NAMES if o != s)
                       < cross[(c, s, k)][s] / thr_b[s] for k in range(len(U[s][c]))] for c in clips} for s in NAMES}
     print("\nValidation rule: reject the USS output for class s when another target class scores higher on it,")
-    print("each divided by its SED-only threshold (" + ", ".join(f"{s} {thr_b[s]:.4f}" for s in NAMES) + ")")
+    print("each divided by its SED-only threshold (" + ", ".join(f"{s} {thr_b[s]:.4f}" for s in NAMES) + ").")
+    print("Assumption: thresholds set on the original audio are a fair scale for USS outputs (see docstring).")
 
-    def in_target(s, c, k):
-        win = gts[s].get(c)
-        return win is not None and k * 2.0 < win[1] and k * 2.0 + 2.0 > win[0]
+    def in_event(s, c, k):
+        """Window overlaps class s's event in clip c (same rule as gate_analysis.overlapping)."""
+        return c in gts[s] and overlapping(k, gts[s][c])
 
-    print(f"\n   {'query':11}{'windows with the queried target':>34}{'rejected':>10}"
-          f"{'other-target windows':>24}{'rejected':>10}{'target-free':>13}{'rejected':>10}")
+    print(f"\n   {'query':11}{'windows on the queried target':>32}{'rejected':>10}"
+          f"{'windows on another target':>28}{'rejected':>10}{'target-free':>13}{'rejected':>10}")
     for s in NAMES:
-        tgt = [accept[s][c][k] for c in clips for k in range(len(U[s][c])) if in_target(s, c, k)]
+        tgt = [accept[s][c][k] for c in clips for k in range(len(U[s][c])) if in_event(s, c, k)]
         oth = [accept[s][c][k] for c in clips for k in range(len(U[s][c]))
-               if manifest[c]["contains"] not in (s, "none")]
+               if manifest[c]["contains"] not in (s, "none") and in_event(manifest[c]["contains"], c, k)]
         free = [accept[s][c][k] for c in clips for k in range(len(U[s][c])) if manifest[c]["contains"] == "none"]
         say = lambda v: f"{100 * (1 - np.mean(v)):.0f}%" if v else "-"  # noqa: E731
-        print(f"   {s:11}{len(tgt):>34}{say(tgt):>10}{len(oth):>24}{say(oth):>10}{len(free):>13}{say(free):>10}")
+        print(f"   {s:11}{len(tgt):>32}{say(tgt):>10}{len(oth):>28}{say(oth):>10}{len(free):>13}{say(free):>10}")
     print("   (rejecting real-target windows is the cost; rejecting other-target windows is the point)")
 
     # ---------- part 2: configurations ----------
@@ -185,8 +200,9 @@ def main():
 
     print("\nLimits: in-sample on the dev set (thresholds and the comparison use the same clips); "
           f"{len(fixes0)} fixes and {len(regs0)} regressions in total,")
-    print("so a change of one event is several percent. The rule had no parameter to tune, but confirming")
-    print("it still needs held-out target recordings.")
+    print("so a change of one event is several percent. No parameter was tuned on the outcome, but the")
+    print("per-class scale is the dev-set SED-only thresholds. The lead-gate rows are in-sample twice (the")
+    print("lead setting was chosen on these clips). Confirming any of this needs held-out target recordings.")
 
 
 if __name__ == "__main__":
