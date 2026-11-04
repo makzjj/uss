@@ -1,27 +1,30 @@
-"""O1 recall and false-alarm check: INT8 scored at the FP32 thresholds, frozen.
+"""O1-style recall and false-alarm check: an INT8 model scored at the FP32 thresholds, frozen.
 
-A deployed INT8 separator would run at the operating point chosen for the system, not at a
-threshold re-tuned for itself. So for each class and pipeline the threshold is set on the FP32
-pieces (lowest threshold with false alarms <= the SED-only count at 0.2, as in Gate 1), then
-applied unchanged to the INT8 pieces. Recall AND false alarms can then both move, and both are
-checked. A re-matched comparison (INT8 given its own threshold) is printed as a second line.
+Two uses, one rule:
+  default     INT8 separator (benchmarks/int8_check.py --full). The SED is unchanged, so the
+              original-audio scores must agree; always-on USS decides the verdict (O1 proper).
+  --sed_int8  INT8 SED (benchmarks/sed_int8.py). The separator is unchanged (saved FP32 USS outputs);
+              each pipeline gates and falls back on its own SED's scores. Rows: SED only, always-on,
+              lead gate; SED only and the lead gate decide the verdict (fixed before any results).
 
-O1 (Requirements v0.3.6): recall loss <= 2 pp; target-absent false alarms still inside P2.
-Recall loss here = FP32 recall - INT8 recall over all low-EBR and overlap events, pooled across
-classes (as the Gate 1 verdict is pooled); per condition and per class are shown alongside.
-False alarms: INT8 count at the frozen threshold must not exceed the allowed count (the P2
-operating point on this set). 36.7 min per class cannot validate 1 FP/h by itself; this only
-shows INT8 does not add false alarms at the same operating point.
+A deployed INT8 model runs at the operating point chosen for the system, not at a threshold
+re-tuned for itself. So for each class and pipeline the threshold is set on the FP32 pieces (lowest
+threshold with false alarms <= the SED-only count at 0.2, as in Gate 1), then applied unchanged to
+the INT8 pieces. Recall AND false alarms can both move. A re-matched comparison (INT8 given its own
+threshold) is printed as a second line.
 
-Pipelines checked:
-  always-on USS            (lo = 0, all classes), the O1 comparison proper
-  --lead                   the Week 6 lead: floor gate, policy and excluded classes as given
-Calibration clips (from the INT8 report) are left out of scoring by default, since INT8 was
-calibrated on them; --include_calib keeps them.
+Limits (Requirements v0.3.7): recall loss <= 2 pp, pooled across classes and conditions; INT8 false
+alarms at the frozen threshold <= the allowed count. 35 min per class cannot validate P2 (1 FP/h) by
+itself; this only shows INT8 does not add false alarms at the same operating point. Calibration
+clips listed in --int8_report are left out of scoring by default (--include_calib keeps them).
+--int8_report must be the report of the model being tested: in --sed_int8 mode the SED report
+(cnn14_int8.json, "stage": "sed"), otherwise the separator report; the script checks this.
 
 Usage (inside the container, from the uss folder):
   python experiments/o1_frozen.py --int8_pieces results/gate1_v2_int8_v2_scores_pieces.csv \\
       --int8_report resunet30_at_soft_int8_v2.json
+  python experiments/o1_frozen.py --sed_int8 --int8_pieces results/gate1_v2_sedint8_scores_pieces.csv \\
+      --int8_report cnn14_int8.json
 """
 import argparse
 import json
@@ -57,8 +60,12 @@ def main():
     ap.add_argument("--test_set", default=f"{TA}/testsets/gate1_v2")
     ap.add_argument("--fp32_pieces", default="results/gate1_v2_scores_pieces.csv")
     ap.add_argument("--int8_pieces", required=True)
-    ap.add_argument("--int8_report", default="", help="INT8 JSON from int8_check.py (lists calibration clips)")
+    ap.add_argument("--int8_report", default="",
+                    help="report of the model under test: separator (int8_check.py) or, with --sed_int8, SED (sed_int8.py)")
     ap.add_argument("--include_calib", action="store_true")
+    ap.add_argument("--sed_int8", action="store_true",
+                    help="the INT8 file changes the SED itself (benchmarks/sed_int8.py): each pipeline gates with "
+                         "its own SED scores, and SED only is checked first")
     ap.add_argument("--lead", nargs=3, metavar=("POLICY", "LO", "EXCLUDE"), default=["kmax", "0.1002", "beeper"],
                     help="lead setting; EXCLUDE is a comma list or 'none'")
     ap.add_argument("--onset_rel", type=float, default=0.5)
@@ -75,17 +82,32 @@ def main():
     _, q8, _ = load(ts, Path(a.int8_pieces), a.onset_rel)
     clips = sorted(manifest)
 
-    # The 'before' scores must agree: same clips, same SED; only the USS output differs
     worst = max(abs(x[0] - y[0]) for s in SOUNDS for c in clips
                 for x, y in zip(fp[(s, "before")][c], q8[(s, "before")][c]))
-    print(f"SED scores on the original audio, FP32 file vs INT8 file: max difference {worst:.1e}"
-          + ("" if worst < 1e-3 else "  <- the two files do not describe the same SED; stopping"))
-    if worst >= 1e-3:
-        sys.exit(1)
+    if a.sed_int8:      # a different SED: original-audio scores are expected to differ
+        print(f"SED scores on the original audio, FP32 SED vs INT8 SED: max difference {worst:.4f} (expected)")
+        if worst < 1e-6:
+            sys.exit("--sed_int8, but the original-audio scores are identical: this looks like an FP32-SED file")
+    else:               # same SED, only the USS output differs: the 'before' scores must agree
+        print(f"SED scores on the original audio, FP32 file vs INT8 file: max difference {worst:.1e}"
+              + ("" if worst < 1e-3 else "  <- the two files do not describe the same SED; stopping"))
+        if worst >= 1e-3:
+            sys.exit(1)
 
+    if a.sed_int8 and not a.int8_report:
+        sys.exit("--sed_int8 needs --int8_report (cnn14_int8.json): it lists the calibration clips to leave out")
+    rep_json = json.loads(Path(a.int8_report).read_text()) if a.int8_report else {}
+    if a.int8_report:
+        is_sed = rep_json.get("stage") == "sed"
+        if a.sed_int8 and not is_sed:
+            sys.exit(f"--sed_int8 needs the SED quantization report (\"stage\": \"sed\"), not {a.int8_report}")
+        if not a.sed_int8 and is_sed:
+            sys.exit(f"{a.int8_report} is an SED report; add --sed_int8 or pass the separator report")
+        if a.sed_int8 and "FP32" not in rep_json.get("uss", ""):
+            sys.exit(f"{a.int8_report} does not state that the USS outputs are FP32; the SED effect is not isolated")
     calib = set()
     if a.int8_report and not a.include_calib:
-        calib = set(json.loads(Path(a.int8_report).read_text()).get("calibration_clips", []))
+        calib = set(rep_json.get("calibration_clips", []))
     scored = [c for c in clips if c not in calib]
     clip_s = json.loads((ts / "settings.json").read_text())["duration_s"]
     hours = len(scored) * clip_s / 3600
@@ -93,19 +115,21 @@ def main():
           f"{hours * 60:.1f} min per class; frozen thresholds set on the FP32 pieces of all {len(clips)} clips")
 
     B = {s: fp[(s, "before")] for s in SOUNDS}
+    B8 = {s: q8[(s, "before")] for s in SOUNDS} if a.sed_int8 else B   # gate and fall-back use each SED
     lead_ex = [] if a.lead[2] == "none" else a.lead[2].split(",")
-    settings = [("always-on USS", "k1", 0.0, []),
+    settings = ([("SED only", None, None, [])] if a.sed_int8 else []) + [("always-on USS", "k1", 0.0, []),
                 (f"lead: {a.lead[0]}, lo {float(a.lead[1]):g}, no {'/'.join(lead_ex) or '-'}",
                  a.lead[0], float(a.lead[1]), lead_ex)]
     verdict = True
     for title, policy, lo, ex in settings:
         gate_classes = [s for s in SOUNDS if s not in ex]
-        m = masks(B, clips, lo, policy, gate_classes)
+        m = masks(B, clips, lo, policy, gate_classes) if policy else None
+        m8 = (m if B8 is B else masks(B8, clips, lo, policy, gate_classes)) if policy else None
         rows, fa_rows = [], []
         for s in SOUNDS:
             anchor = sum(evaluate(B[s], gts[s], USS_THRESHOLD)[1].values())
-            d_fp = gated(B[s], fp[(s, "after")], m[s])
-            d_q8 = gated(B[s], q8[(s, "after")], m[s])
+            d_fp = gated(B[s], fp[(s, "after")], m[s]) if policy else B[s]
+            d_q8 = gated(B8[s], q8[(s, "after")], m8[s]) if policy else B8[s]
             thr = match(d_fp, gts[s], anchor)[0]                  # set on FP32, all clips
             sub = lambda d: {c: d[c] for c in scored}            # noqa: E731
             g = {c: v for c, v in gts[s].items() if c in scored}
@@ -144,7 +168,8 @@ def main():
             print(f"     {s:11} threshold {thr:.4f}: FP32 {n_fp}, INT8 {n_q8}, allowed {allowed}  "
                   f"({'ok' if ok else 'OVER'}; INT8 rate {n_q8 / hours:.1f}/h, 95% upper bound {up:.1f}/h)"
                   f"   re-matched INT8 threshold {thr_r:.4f}")
-        if title.startswith("always-on"):
+        decides = (title == "SED only" or title.startswith("lead")) if a.sed_int8 else title.startswith("always-on")
+        if decides:
             verdict &= loss <= O1_RECALL_PP and fa_ok
         report["settings"].append({
             "setting": title, "recall_loss_pp": round(float(loss), 2), "events": len(rows),
@@ -154,10 +179,14 @@ def main():
             "false_alarms": [{"class": s_, "allowed": int(al), "fp32": int(nf), "int8": int(nq),
                               "frozen_threshold": round(float(t_), 5), "rematched_int8_threshold": round(float(tr), 5)}
                              for s_, al, nf, nq, t_, tr in fa_rows]})
-    print(f"\nO1 recall + false alarms (always-on USS, frozen thresholds): {'MET' if verdict else 'NOT MET'}")
-    if a.int8_report and Path(a.int8_report).exists():
-        report["int8_sha256"] = json.loads(Path(a.int8_report).read_text()).get("int8_sha256")
-    report["o1_verdict_always_on"] = bool(verdict)
+    which = "SED only and the lead gate" if a.sed_int8 else "always-on USS"
+    print(f"\nO1-style recall + false alarms ({which}, frozen thresholds): {'MET' if verdict else 'NOT MET'}")
+    if rep_json:
+        report["int8_sha256"] = rep_json.get("int8_sha256")
+        report["int8_model"] = rep_json.get("model", "ResUNet30 separator")
+    report["verdict_settings"] = which
+    report["o1_verdict"] = bool(verdict)
+    report["o1_verdict_always_on"] = bool(verdict) if not a.sed_int8 else None
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2))
     print(f"Saved {out_path}")
