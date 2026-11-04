@@ -150,7 +150,7 @@ def main():
     print("Predictions for this exact order (planned times; replace with the S4-measured times afterwards):")
     print(f"  core 3 scores outputs:     {common} --t_query {sep + score:.2f} --t_plan {sep + score:.2f}")
     print(f"  SED cores score outputs:   {common} --t_query {sep:.2f} --t_plan {sep:.2f} "
-          f"--score_delay_s {2.0 + 0.66:.2f}")
+          f"--score_delay_s {2.0 + 2 * a.sed_s:.2f}")   # one hop + main pass + scoring pass, after the last separation
 
 
 if __name__ == "__main__":

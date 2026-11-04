@@ -62,7 +62,8 @@ def gate_masks(B, clips, lo, policy, gate_classes):
     return fired
 
 
-def simulate(order, queries, n_hops, t_query, t_plan, ttl, sed_s, max_wait, rng, sample_times, score_delay=0.0):
+def simulate(order, queries, n_hops, t_query, t_plan, ttl, sed_s, max_wait, rng, sample_times, score_delay=0.0,
+             delay_per_query=0.0):
     """Run the queue over one stream order. queries[(clip, k)] = classes to query for that window.
     Returns the set of (clip, k, class) whose result arrived in time, and job statistics."""
     jobs = []
@@ -74,7 +75,8 @@ def simulate(order, queries, n_hops, t_query, t_plan, ttl, sed_s, max_wait, rng,
                 start = t_clip + k * HOP
                 dur = sum(sample_times(rng) if sample_times else t_query for _ in q)   # actual
                 jobs.append({"clip": c, "k": k, "q": q, "arrive": start + HOP + sed_s,
-                             "deadline": start + ttl, "dur": dur, "plan": t_plan * len(q)})  # planned (p95)
+                             "deadline": start + ttl, "dur": dur, "plan": t_plan * len(q),   # planned (p95)
+                             "delay": (score_delay + delay_per_query * (len(q) - 1)) if score_delay else 0.0})
         t_clip += n_hops[c] * HOP
     stats = Counter({k: 0 for k in STAT_KEYS})
     stats["submitted"] = len(jobs)
@@ -86,8 +88,8 @@ def simulate(order, queries, n_hops, t_query, t_plan, ttl, sed_s, max_wait, rng,
         busy_until = t0 + w["dur"]
         plan_until = t0 + w["plan"]          # all the scheduler can know about the running job
         waits.append(t0 - w["arrive"])
-        if busy_until + score_delay <= w["deadline"]:     # result counts once the SED cores have scored it
-            verdict.append(busy_until + score_delay - (w["deadline"] - ttl))
+        if busy_until + w["delay"] <= w["deadline"]:      # result counts once the SED cores have scored it
+            verdict.append(busy_until + w["delay"] - (w["deadline"] - ttl))
             done.update((w["clip"], w["k"], s) for s in w["q"])
             stats["completed"] += 1
         else:
@@ -97,7 +99,7 @@ def simulate(order, queries, n_hops, t_query, t_plan, ttl, sed_s, max_wait, rng,
         while waiting and busy_until <= until:
             w = waiting.pop(0)
             t0 = max(busy_until, w["arrive"])
-            if t0 + w["plan"] + score_delay > w["deadline"]:
+            if t0 + w["plan"] + w["delay"] > w["deadline"]:
                 stats["expired"] += 1
                 continue
             start(w, t0)
@@ -106,13 +108,13 @@ def simulate(order, queries, n_hops, t_query, t_plan, ttl, sed_s, max_wait, rng,
         now = j["arrive"]
         run_queue(now)
         if busy_until <= now:                # idle core (run_queue has emptied the queue)
-            if now + j["plan"] + score_delay > j["deadline"]:
+            if now + j["plan"] + j["delay"] > j["deadline"]:
                 stats["dropped"] += 1
             else:
                 start(j, now)
             continue
         ahead = max(plan_until - now, 0.0) + sum(w["plan"] for w in waiting)   # planned, never actual
-        if len(waiting) >= max_wait or now + ahead + j["plan"] + score_delay > j["deadline"]:
+        if len(waiting) >= max_wait or now + ahead + j["plan"] + j["delay"] > j["deadline"]:
             stats["dropped"] += 1
         else:
             waiting.append(j)
@@ -136,8 +138,11 @@ def main():
     ap.add_argument("--sed_s", type=float, default=1.21,
                     help="SED p95 with USS running (Week 5 PyTorch: 1.21; Week 7 ONNX: 0.66)")
     ap.add_argument("--score_delay_s", type=float, default=0.0,
-                    help="detector-core design: delay before a separated output is scored (up to one hop + "
-                         "SED time); counts against the deadline without occupying the USS core")
+                    help="detector-core design: delay before a separated output is scored (one hop + SED "
+                         "time); counts against the deadline without occupying the USS core")
+    ap.add_argument("--score_delay_per_query_s", type=float, default=0.0,
+                    help="with --score_delay_s: extra delay per further query (0: outputs are handed over as each "
+                         "is separated, so only the last one's delay counts, as s4_pi.py --score_on sed_cores)")
     ap.add_argument("--max_wait", type=int, default=1)
     ap.add_argument("--skip_alerting", action="store_true")
     ap.add_argument("--orders", type=int, default=200)
@@ -231,7 +236,7 @@ def main():
         orders += [(f"random {i}", list(rng.permutation(clips))) for i in range(a.orders)]
     for name, order in orders:
         done, st, waits, verdict = simulate(order, queries, n_hops, a.t_query, a.t_plan, a.ttl_s, a.sed_s,
-                                            a.max_wait, rng_t, sample_times, a.score_delay_s)
+                                            a.max_wait, rng_t, sample_times, a.score_delay_s, a.score_delay_per_query_s)
         hits, fa, rm = scheduled(done)
         rec_s, f_s, r_s = summarise(hits)
         rec_r, _, _ = summarise(rm)
