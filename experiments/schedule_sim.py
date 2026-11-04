@@ -132,8 +132,9 @@ def main():
     ap.add_argument("--exclude", nargs="*", default=["beeper"], choices=NAMES)
     ap.add_argument("--t_query", type=float, default=19.4, help="seconds per query on the USS core (Week 5)")
     ap.add_argument("--t_query_csv", default="", help="Pi runs.csv (latency_ms per k=1 job) to sample from")
-    ap.add_argument("--t_plan", type=float, default=19.8,
-                    help="per-query time the queue plans with (Week 5 p95); with --t_query_csv, its p95")
+    ap.add_argument("--t_plan", type=float, default=None,
+                    help="per-query time the queue plans with (default: Week 5 p95 19.8, or the p95 of --t_query_csv). "
+                         "Give it explicitly with --t_query_csv to plan as a Pi run did (its s4_config.json plan)")
     ap.add_argument("--ttl_s", type=float, default=60.0)
     ap.add_argument("--sed_s", type=float, default=1.21,
                     help="SED p95 with USS running (Week 5 PyTorch: 1.21; Week 7 ONNX: 0.66)")
@@ -148,6 +149,9 @@ def main():
     ap.add_argument("--orders", type=int, default=200)
     ap.add_argument("--order_file", default="",
                     help="s4_order.json: simulate only this exact clip order (the Pi's S4 order)")
+    ap.add_argument("--repeats", type=int, default=100,
+                    help="with --order_file and --t_query_csv: number of independent draws of the job times, "
+                         "so the prediction is a range, not one random outcome")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--onset_rel", type=float, default=0.5)
     a = ap.parse_args()
@@ -168,10 +172,13 @@ def main():
         with open(a.t_query_csv) as fh:
             pool = np.array([float(r["latency_ms"]) / 1000 for r in csv.DictReader(fh)])
         sample_times = lambda rng: float(rng.choice(pool))  # noqa: E731
-        a.t_plan = float(np.percentile(pool, 95))
+        planned_from_pool = a.t_plan is None
+        if planned_from_pool:
+            a.t_plan = float(np.percentile(pool, 95))
         t_desc = (f"sampled from {a.t_query_csv} (median {np.median(pool):.1f} s, mean {pool.mean():.1f} s, "
-                  f"planned at p95 {a.t_plan:.1f} s)")
+                  f"planned at {a.t_plan:.1f} s" + (" = its p95)" if planned_from_pool else ", as given)"))
     else:
+        a.t_plan = 19.8 if a.t_plan is None else a.t_plan
         t_desc = f"{a.t_query:.1f} s per query, planned at {a.t_plan:.1f} s"
 
     # offline gated pipeline: every job completes; its thresholds are frozen for scheduling
@@ -230,7 +237,8 @@ def main():
         fixed = json.loads(Path(a.order_file).read_text())["clips"]
         if sorted(fixed) != clips:
             sys.exit(f"{a.order_file} does not hold exactly this test set's {len(clips)} clips")
-        orders = [("S4 order", fixed)]
+        n_draw = a.repeats if a.t_query_csv else 1        # fixed job times give one outcome
+        orders = [("S4 order", fixed)] * n_draw
     else:
         orders = [("grouped (worst case)", sorted(clips, key=lambda c: (manifest[c]["contains"], c)))]
         orders += [(f"random {i}", list(rng.permutation(clips))) for i in range(a.orders)]
@@ -252,15 +260,20 @@ def main():
                 f"expired {st['expired']}, late {st['late']}  (re-matched " + " / ".join(f"{x['rec_rm'][c]:+.1f}" for c in CONDITIONS)
                 + ")")
 
-    print(f"Scheduled, {'S4 order' if a.order_file else 'grouped worst case'}:   d = {line(runs[0])}")
-    rand = runs[1:]
+    print(f"Scheduled, {'S4 order' + (' (first draw)' if len(runs) > 1 else '') if a.order_file else 'grouped worst case'}:"
+          f"   d = {line(runs[0])}")
+    rand = runs if (a.order_file and len(runs) > 1) else runs[1:]
     if rand:
         mean_d = {c: np.mean([x["rec"][c] for x in rand]) for c in CONDITIONS}
         lo_d = {c: np.percentile([x["rec"][c] for x in rand], 5) for c in CONDITIONS}
         hi_d = {c: np.percentile([x["rec"][c] for x in rand], 95) for c in CONDITIONS}
         comp = [x["st"]["completed"] / max(x["st"]["submitted"], 1) for x in rand]
-        print(f"Scheduled, {len(rand)} random orders: d mean " + " / ".join(f"{mean_d[c]:+.1f}" for c in CONDITIONS)
+        label = f"{len(rand)} draws of the job times on the S4 order" if a.order_file else f"{len(rand)} random orders"
+        print(f"Scheduled, {label}: d mean " + " / ".join(f"{mean_d[c]:+.1f}" for c in CONDITIONS)
               + "  [5-95%: " + " / ".join(f"{lo_d[c]:+.1f}..{hi_d[c]:+.1f}" for c in CONDITIONS) + "]")
+        done_n = [x["st"]["completed"] for x in rand]
+        print(f"   jobs done in time (count): mean {np.mean(done_n):.1f}, 5-95% {np.percentile(done_n, 5):.0f}-"
+              f"{np.percentile(done_n, 95):.0f}; late {np.mean([x['st']['late'] for x in rand]):.1f} on average")
         print(f"   jobs completed in time: median {np.median(comp):.0%} (range {min(comp):.0%}-{max(comp):.0%}); "
               f"fixes/regressions median {np.median([x['f'] for x in rand]):.0f}/"
               f"{np.median([x['r'] for x in rand]):.0f}")
