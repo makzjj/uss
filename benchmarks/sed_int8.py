@@ -137,11 +137,13 @@ def main():
     # ---------- 1. export ----------
     if not (a.reuse and fp32_path.exists()):
         x0 = torch.zeros(1, SEG)
-        torch.onnx.export(SED(model), (x0,), str(fp32_path), opset_version=17, input_names=["audio"],
+        torch.onnx.export(SED(model).eval(), (x0,), str(fp32_path), opset_version=17, input_names=["audio"],
                           output_names=["clipwise", "frames"], do_constant_folding=True)
         onnx.checker.check_model(str(fp32_path))
     so = ort.SessionOptions()
     so.intra_op_num_threads = a.threads
+    model.eval()                                   # export restores the wrapper's mode; force inference mode
+    assert not model.training, "Cnn14 must be in eval mode for the reference scores"
     sess32 = ort.InferenceSession(str(fp32_path), so, providers=["CPUExecutionProvider"])
     check_rows = [r for r in rows if Path(r["clip"]).name not in calib_names][::20]
     worst_c = worst_f = 0.0
