@@ -62,7 +62,7 @@ def gate_masks(B, clips, lo, policy, gate_classes):
     return fired
 
 
-def simulate(order, queries, n_hops, t_query, t_plan, ttl, sed_s, max_wait, rng, sample_times):
+def simulate(order, queries, n_hops, t_query, t_plan, ttl, sed_s, max_wait, rng, sample_times, score_delay=0.0):
     """Run the queue over one stream order. queries[(clip, k)] = classes to query for that window.
     Returns the set of (clip, k, class) whose result arrived in time, and job statistics."""
     jobs = []
@@ -86,8 +86,8 @@ def simulate(order, queries, n_hops, t_query, t_plan, ttl, sed_s, max_wait, rng,
         busy_until = t0 + w["dur"]
         plan_until = t0 + w["plan"]          # all the scheduler can know about the running job
         waits.append(t0 - w["arrive"])
-        if busy_until <= w["deadline"]:
-            verdict.append(busy_until - (w["deadline"] - ttl))
+        if busy_until + score_delay <= w["deadline"]:     # result counts once the SED cores have scored it
+            verdict.append(busy_until + score_delay - (w["deadline"] - ttl))
             done.update((w["clip"], w["k"], s) for s in w["q"])
             stats["completed"] += 1
         else:
@@ -97,7 +97,7 @@ def simulate(order, queries, n_hops, t_query, t_plan, ttl, sed_s, max_wait, rng,
         while waiting and busy_until <= until:
             w = waiting.pop(0)
             t0 = max(busy_until, w["arrive"])
-            if t0 + w["plan"] > w["deadline"]:
+            if t0 + w["plan"] + score_delay > w["deadline"]:
                 stats["expired"] += 1
                 continue
             start(w, t0)
@@ -106,13 +106,13 @@ def simulate(order, queries, n_hops, t_query, t_plan, ttl, sed_s, max_wait, rng,
         now = j["arrive"]
         run_queue(now)
         if busy_until <= now:                # idle core (run_queue has emptied the queue)
-            if now + j["plan"] > j["deadline"]:
+            if now + j["plan"] + score_delay > j["deadline"]:
                 stats["dropped"] += 1
             else:
                 start(j, now)
             continue
         ahead = max(plan_until - now, 0.0) + sum(w["plan"] for w in waiting)   # planned, never actual
-        if len(waiting) >= max_wait or now + ahead + j["plan"] > j["deadline"]:
+        if len(waiting) >= max_wait or now + ahead + j["plan"] + score_delay > j["deadline"]:
             stats["dropped"] += 1
         else:
             waiting.append(j)
@@ -133,10 +133,16 @@ def main():
     ap.add_argument("--t_plan", type=float, default=19.8,
                     help="per-query time the queue plans with (Week 5 p95); with --t_query_csv, its p95")
     ap.add_argument("--ttl_s", type=float, default=60.0)
-    ap.add_argument("--sed_s", type=float, default=1.21, help="SED p95 with USS running (Week 5)")
+    ap.add_argument("--sed_s", type=float, default=1.21,
+                    help="SED p95 with USS running (Week 5 PyTorch: 1.21; Week 7 ONNX: 0.66)")
+    ap.add_argument("--score_delay_s", type=float, default=0.0,
+                    help="detector-core design: delay before a separated output is scored (up to one hop + "
+                         "SED time); counts against the deadline without occupying the USS core")
     ap.add_argument("--max_wait", type=int, default=1)
     ap.add_argument("--skip_alerting", action="store_true")
     ap.add_argument("--orders", type=int, default=200)
+    ap.add_argument("--order_file", default="",
+                    help="s4_order.json: simulate only this exact clip order (the Pi's S4 order)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--onset_rel", type=float, default=0.5)
     a = ap.parse_args()
@@ -195,15 +201,16 @@ def main():
         rematched = {s: match(d[s], gts[s], anchor[s])[1] for s in NAMES}
         return {s: frozen[s][0] for s in NAMES}, fa, rematched
 
-    hours = len(clips) * 10 / 3600
     n_jobs = len(queries)
     n_hops = {c: len(B[NAMES[0]][c]) for c in clips}
     stream_s = sum(n_hops.values()) * HOP
+    hours = stream_s / 3600
     load_pk = sum(len(q) for q in queries.values()) * (pool.mean() if sample_times else a.t_query) / stream_s
     print(f"Scheduled recall: {ts.name}, {len(clips)} clips as one {hours * 60:.0f} min stream; gate {a.policy}, "
           f"lo {a.lo:g}, never gated: {', '.join(a.exclude) or 'none'}" + ("; skipping windows that already alert"
                                                                           if a.skip_alerting else ""))
-    print(f"Job time {t_desc}; TTL {a.ttl_s:g} s; SED p95 {a.sed_s:g} s; one running + {a.max_wait} waiting")
+    print(f"Job time {t_desc}; TTL {a.ttl_s:g} s; SED p95 {a.sed_s:g} s; one running + {a.max_wait} waiting"
+          + (f"; outputs scored on the SED cores, {a.score_delay_s:g} s after separation" if a.score_delay_s else ""))
     print(f"Jobs wanted: {n_jobs} windows ({n_jobs / sum(n_hops.values()):.1%} of hops), USS core demand "
           f"{load_pk:.2f} of real time, from mean job time (the core can supply 1.0; the planning budget is "
           f"{BUDGET:g})")
@@ -214,11 +221,17 @@ def main():
     rng = np.random.default_rng(a.seed)          # stream orders
     rng_t = np.random.default_rng(a.seed + 1)    # job times, so orders and times vary independently
     runs = []
-    orders = [("grouped (worst case)", sorted(clips, key=lambda c: (manifest[c]["contains"], c)))]
-    orders += [(f"random {i}", list(rng.permutation(clips))) for i in range(a.orders)]
+    if a.order_file:
+        fixed = json.loads(Path(a.order_file).read_text())["clips"]
+        if sorted(fixed) != clips:
+            sys.exit(f"{a.order_file} does not hold exactly this test set's {len(clips)} clips")
+        orders = [("S4 order", fixed)]
+    else:
+        orders = [("grouped (worst case)", sorted(clips, key=lambda c: (manifest[c]["contains"], c)))]
+        orders += [(f"random {i}", list(rng.permutation(clips))) for i in range(a.orders)]
     for name, order in orders:
         done, st, waits, verdict = simulate(order, queries, n_hops, a.t_query, a.t_plan, a.ttl_s, a.sed_s,
-                                            a.max_wait, rng_t, sample_times)
+                                            a.max_wait, rng_t, sample_times, a.score_delay_s)
         hits, fa, rm = scheduled(done)
         rec_s, f_s, r_s = summarise(hits)
         rec_r, _, _ = summarise(rm)
@@ -234,7 +247,7 @@ def main():
                 f"expired {st['expired']}, late {st['late']}  (re-matched " + " / ".join(f"{x['rec_rm'][c]:+.1f}" for c in CONDITIONS)
                 + ")")
 
-    print(f"Scheduled, grouped worst case:   d = {line(runs[0])}")
+    print(f"Scheduled, {'S4 order' if a.order_file else 'grouped worst case'}:   d = {line(runs[0])}")
     rand = runs[1:]
     if rand:
         mean_d = {c: np.mean([x["rec"][c] for x in rand]) for c in CONDITIONS}
@@ -252,10 +265,13 @@ def main():
         fa_max = {s: max(x["fa"][s] for x in rand) for s in NAMES}
         print("   false alarms at the frozen thresholds, worst order: "
               + ", ".join(f"{s} {fa_max[s]} (allowed {anchor[s]})" for s in NAMES))
-    print("\nIn-sample on the dev set. Main number = frozen thresholds; re-run with the Week 7 Pi job times.")
+    print("\nIn-sample on the dev set. Main number = frozen thresholds.")
 
     timing = Path(a.t_query_csv).stem.replace("_runs", "") if a.t_query_csv else f"tq{a.t_query:g}-plan{a.t_plan:g}"
-    extra = ("" if a.ttl_s == 60 else f"_ttl{a.ttl_s:g}") + ("" if a.max_wait == 1 else f"_wait{a.max_wait}")
+    extra = (("" if a.ttl_s == 60 else f"_ttl{a.ttl_s:g}") + ("" if a.max_wait == 1 else f"_wait{a.max_wait}")
+             + ("" if a.sed_s == 1.21 else f"_sed{a.sed_s:g}")
+             + (f"_scoredelay{a.score_delay_s:g}" if a.score_delay_s else ""))
+    extra += "_s4order" if a.order_file else ""
     out = Path(f"results/{ts.name}_schedule_{a.policy}_lo{a.lo:g}" + ("_skip" if a.skip_alerting else "")
                + f"_{timing}{extra}.json")
     out.parent.mkdir(parents=True, exist_ok=True)
