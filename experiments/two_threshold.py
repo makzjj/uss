@@ -26,6 +26,11 @@ are not paired), with the single-threshold design. t2 is set offline only, never
 In-sample: t2 is chosen on these clips, so the result is an upper bound; a sensitivity check raises each t2 one
 step (to the next candidate score) and reports how many offline fixes depend on t2 sitting at that edge.
 
+Final design: once t2 is frozen, a class with t2 = none can never be recovered on any data, so its USS queries
+are core time spent for nothing. The gate keeps it as a TRIGGER (unchanged), but jobs query only gated classes
+with finite t2. Offline this changes nothing (checked and printed); under the queue jobs get shorter. For a class
+with t2 = none the window behind it is named: the highest USS score among its queried windows, a false alarm.
+
 Usage (inside the container, from the uss folder):
   python experiments/two_threshold.py --t_query_csv results/s4_sed_cores_20261104-235255/s4_sed_cores_k1_query_times.csv
 """
@@ -156,12 +161,20 @@ def main():
     for s in NAMES:
         if s in a.exclude:
             t2_txt = "not gated"
+        elif cand_lists[s] == 0:
+            t2_txt = "never queried"
         elif not np.isfinite(t2[s]):
             t2_txt = "none (no FA room)"
         else:
             t2_txt = f"{t2[s]:.4f}"
         print(f"   {s:11}{t1[s]:>15.4f}{t2_txt:>22}{thr_single[s]:>18.4f}{anchor[s]:>11}{fa_t1[s]:>10}"
               f"{anchor[s] - fa_t1[s]:>7}")
+
+    for s in NAMES:
+        if s not in a.exclude and cand_lists[s] > 0 and not np.isfinite(t2[s]):
+            c, k = max(((c, k) for (c, k, s2) in all_two if s2 == s), key=lambda ck: U[s][ck[0]][ck[1]][0])
+            print(f"   {s}: no room because its highest USS score, {U[s][c][k][0]:.4f} in {c} (piece {k}, clip "
+                  f"contains {manifest[c]['contains']}, {manifest[c]['condition']}), is a false alarm")
 
     def show(label, res):
         d, fx, rg, fas = res
@@ -176,16 +189,25 @@ def main():
     print(show("single threshold", off_s))
     print(show("two thresholds", off_t))
     print(show("two thresholds, t2 one step up", off_n) + "   <- in-sample sensitivity")
+    useful = [s for s in NAMES if np.isfinite(t2[s])]
+    q_final = {ck: [s for s in cl if s in useful] for ck, cl in q_two.items()}
+    q_final = {ck: cl for ck, cl in q_final.items() if cl}
+    all_final = {(c, k, s) for (c, k), cl in q_final.items() for s in cl}
+    off_f = summarise(two_dets(all_final, t2), ones)
+    same = off_f[:3] == off_t[:3] and off_f[3] == off_t[3]
+    print(show("two thresholds, query finite-t2 only", off_f)
+          + f"   <- final design; offline {'identical (as expected)' if same else 'DIFFERS: check'}")
 
     with open(a.t_query_csv) as fh:
         pool = np.array([float(r["latency_ms"]) / 1000 for r in csv.DictReader(fh)])
     sample = lambda rng: float(rng.choice(pool))  # noqa: E731
     rng_o, rng_t = np.random.default_rng(a.seed), np.random.default_rng(a.seed + 1)
-    runs = {"single threshold": [], "two thresholds": []}
+    runs = {"single threshold": [], "two thresholds": [], "two thresholds, finite-t2 queries": []}
     for _ in range(a.orders):
         order = list(rng_o.permutation(clips))
         state = rng_t.bit_generator.state
-        for name, q in (("single threshold", q_single), ("two thresholds", q_two)):
+        for name, q in (("single threshold", q_single), ("two thresholds", q_two),
+                        ("two thresholds, finite-t2 queries", q_final)):
             rng_t.bit_generator.state = state          # same job-time draws for both designs on this order
             done, st, _, _ = simulate(order, q, n_hops, 0.0, a.t_plan, a.ttl_s, a.sed_s, a.max_wait, rng_t,
                                       sample, a.score_delay_s, 0.0)
@@ -199,7 +221,7 @@ def main():
         fx = np.array([r[0][1] for r in rs])
         rg = np.array([r[0][2] for r in rs])
         fa = {s: max(r[0][3][s] for r in rs) for s in NAMES}
-        print(f"   {name:18} d mean " + " / ".join(f"{d[c].mean():+.1f}" for c in CONDITIONS)
+        print(f"   {name:34} d mean " + " / ".join(f"{d[c].mean():+.1f}" for c in CONDITIONS)
               + "  [5-95%: " + " / ".join(f"{np.percentile(d[c], 5):+.1f}..{np.percentile(d[c], 95):+.1f}"
                                           for c in CONDITIONS)
               + f"]   fixes mean {fx.mean():.1f}, regressions mean {rg.mean():.1f} (max {rg.max()})   "
@@ -219,7 +241,9 @@ def main():
         "t1": t1, "t2": {s: (t2[s] if np.isfinite(t2[s]) else None) for s in NAMES},
         "t2_one_step_up": {s: (t2_next[s] if np.isfinite(t2_next[s]) else None) for s in NAMES},
         "thr_single": thr_single, "allowed_false_alarms": anchor, "false_alarms_at_t1": fa_t1,
-        "offline": {"single": res(off_s), "two": res(off_t), "two_t2_one_step_up": res(off_n)},
+        "offline": {"single": res(off_s), "two": res(off_t), "two_t2_one_step_up": res(off_n),
+                    "two_finite_t2_queries": res(off_f)},
+        "final_query_classes": useful,
         "scheduled": sched, "args": vars(a)}, indent=2, default=float))
     print(f"Saved {out}")
 
