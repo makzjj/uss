@@ -1,4 +1,4 @@
-"""Raspberry Pi 4 CPU benchmark for Gate 2 (Requirements v0.3.5, S1-S3).
+"""Raspberry Pi 4 CPU benchmark for Gate 2 (Requirements v0.3.7, S1-S3).
 Times ONE stage per process.
 
   --stage sed : Cnn14 audio tagging on one 2 s segment (the always-on stage).
@@ -22,6 +22,8 @@ Examples (fresh process each time):
   python benchmark_pi.py --stage sep --backend onnx --onnx resunet30_at_soft_fp32.onnx \
       --conditions_dir query_conditions --threads 1 --cpus 3
   # see run_week7_pi.sh
+  # Week 7 SED: python benchmark_pi.py --stage sed --backend onnx --onnx cnn14_fp32_pi.onnx --threads 2 --cpus 0,1
+  #   (run_week7_sed_pi.sh; the ONNX SED also computes the frame scores the deployment needs)
 
 ONNX notes: torch is still imported (the harness uses it), so peak_rss_mb overstates an ONNX-only
 deployment; rss_before_onnx_session_mb is recorded so it can be subtracted. ONNX threads do not
@@ -68,13 +70,19 @@ p.add_argument("--pause_pid", type=int, default=0,
                help="sed stage: pause this process (USS) while each SED window runs, resume after")
 p.add_argument("--allow_governor", action="store_true", help="run even if governor is not 'performance'")
 p.add_argument("--outdir", default="results")
-p.add_argument("--backend", choices=["torch", "onnx"], default="torch", help="separator backend (sep stage)")
-p.add_argument("--onnx", default="resunet30_at_soft_fp32.onnx", help="ONNX file for --backend onnx")
+p.add_argument("--backend", choices=["torch", "onnx"], default="torch", help="model backend (sed and sep stages)")
+p.add_argument("--onnx", default="",
+               help="ONNX file for --backend onnx (sep default: resunet30_at_soft_fp32.onnx; sed: required)")
 p.add_argument("--save_optimized", default="",
                help="ONNX only: save ONNX Runtime's optimized graph here (shows which INT8 ops really run)")
 p.add_argument("--conditions_dir", default="",
                help="cached query conditions (<sound>.npy from cache_queries.py); default: one-hot as in Week 5")
 args = p.parse_args()
+if args.backend == "onnx" and not args.onnx:
+    if args.stage == "sep":
+        args.onnx = "resunet30_at_soft_fp32.onnx"
+    else:
+        sys.exit("--stage sed --backend onnx needs --onnx (e.g. cnn14_fp32_pi.onnx from export_sed_onnx_pi.py)")
 
 # Pin to cores BEFORE torch starts its thread pool.
 if args.cpus:
@@ -133,6 +141,15 @@ def throttle_bits(s):
         return int(s.split("=")[1], 16)
     except (IndexError, ValueError):
         return None
+
+
+def file_sha256(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def rss_mb():
@@ -219,7 +236,24 @@ x = torch.from_numpy(np.ascontiguousarray(seg)).unsqueeze(0)  # (1, 64000)
 
 # ---------- build the stage (load time measured) ----------
 t_load0 = time.perf_counter()
-if args.stage == "sed":
+if args.stage == "sed" and args.backend == "onnx":
+    import onnxruntime as ort                   # ONNX SED (export_sed_onnx_pi.py): clip AND frame scores
+    so = ort.SessionOptions()
+    so.intra_op_num_threads = args.threads
+    so.inter_op_num_threads = 1
+    so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    so.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    env["rss_before_onnx_session_mb"] = round(rss_mb(), 1)
+    sess = ort.InferenceSession(args.onnx, so, providers=["CPUExecutionProvider"])
+    x_np = x.numpy()
+    model = None
+
+    def forward():
+        return torch.from_numpy(sess.run(None, {"audio": x_np})[0])   # clipwise, for the summary below
+    env["onnxruntime"] = ort.__version__
+    env["onnx_file"] = args.onnx
+    env["onnx_sha256"] = file_sha256(args.onnx)
+elif args.stage == "sed":
     from panns_inference.models import Cnn14
     model = Cnn14(sample_rate=32000, window_size=1024, hop_size=320,
                   mel_bins=64, fmin=50, fmax=14000, classes_num=527)  # same args as uss.utils.load_pretrained_panns
@@ -227,8 +261,10 @@ if args.stage == "sed":
     model.load_state_dict(ckpt["model"])
     model.eval()
 
+    from export_sed_onnx_pi import clip_and_frames   # same work as the ONNX SED: clip AND frame scores
+
     def forward():
-        return model(x)["clipwise_output"]      # includes log-mel front end
+        return clip_and_frames(model, x)[0]     # includes log-mel front end; clipwise for the summary
 else:
     model = None
     if args.backend == "torch":                 # ONNX runs never load the PyTorch model (keeps peak RAM honest)
@@ -277,11 +313,7 @@ else:
             return out
         env["onnxruntime"] = ort.__version__
         env["onnx_file"] = args.onnx
-        h = __import__("hashlib").sha256()
-        with open(args.onnx, "rb") as fh:
-            for block in iter(lambda: fh.read(1 << 20), b""):
-                h.update(block)
-        env["onnx_sha256"] = h.hexdigest()
+        env["onnx_sha256"] = file_sha256(args.onnx)
 env["model_load_s"] = round(time.perf_counter() - t_load0, 2)
 
 # Take-turns mode: SED pauses USS while it works, so the two never share the memory system
@@ -305,9 +337,10 @@ if args.stage == "sed" and args.pause_pid:
     env["pause_pid"] = args.pause_pid
 env["params_millions"] = (round(sum(t.numel() for t in model.parameters()) / 1e6, 2) if model is not None
                           else None)
-env["backend"] = args.backend if args.stage == "sep" else "torch"
-env["precision"] = ("int8" if args.stage == "sep" and args.backend == "onnx" and "int8" in Path(args.onnx).name
-                    else "fp32")
+env["backend"] = args.backend
+env["precision"] = "int8" if args.backend == "onnx" and "int8" in Path(args.onnx).name else "fp32"
+if args.stage == "sed":
+    env["sed_outputs"] = "clip + frame scores"   # both backends (Week 5 PyTorch runs timed the clip score only)
 env["conditions"] = args.conditions_dir or "one-hot (Week 5)"
 env["rss_after_load_mb"] = round(rss_mb(), 1)
 
@@ -401,7 +434,7 @@ ktag = f"_k{args.k}" if args.stage == "sep" else ""
 cpus = f"_c{args.cpus.replace(',', '')}" if args.cpus else ""
 extra = f"_{args.tag}" if args.tag else ""
 btag = ""
-if args.stage == "sep" and args.backend == "onnx":
+if args.backend == "onnx":
     btag = "_onnx-" + ("int8" if "int8" in Path(args.onnx).name else "fp32")
 tag = f"{args.stage}{btag}{ktag}_t{args.threads}{cpus}{extra}_{datetime.now():%Y%m%d-%H%M%S}"
 with open(outdir / f"{tag}_runs.csv", "w", newline="") as f:
