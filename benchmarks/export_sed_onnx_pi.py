@@ -85,8 +85,13 @@ def main():
     rng = np.random.default_rng(0)
     wins += [(rng.standard_normal(SEG) * lvl).astype(np.float32) for lvl in (0.001, 0.01, 0.1, 0.3)]
 
-    torch.onnx.export(SED(model).eval(), (torch.zeros(1, SEG),), a.out, opset_version=17, input_names=["audio"],
-                      output_names=["clipwise", "frames"], do_constant_folding=True)
+    export_kw = dict(opset_version=17, input_names=["audio"], output_names=["clipwise", "frames"],
+                     do_constant_folding=True)
+    try:        # newer PyTorch defaults to a different exporter; use the classic one, as on the server
+        torch.onnx.export(SED(model).eval(), (torch.zeros(1, SEG),), a.out, dynamo=False, **export_kw)
+    except TypeError:   # older PyTorch has no dynamo option and always uses the classic exporter
+        torch.onnx.export(SED(model).eval(), (torch.zeros(1, SEG),), a.out, **export_kw)
+    
     model.eval()
     assert not model.training, "Cnn14 must be in eval mode for the reference scores"
     onnx.checker.check_model(a.out)
