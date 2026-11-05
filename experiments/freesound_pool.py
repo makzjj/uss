@@ -119,7 +119,7 @@ def scan(a):
         dev += [p for p in d.rglob("*") if p.suffix.lower() in AUDIO_EXT and "testsets" not in p.parts]
     print(f"Fingerprinting {len(dev)} dev sources and queries for the duplicate check ...")
     dev_fp = [(p, fingerprint(librosa.load(str(p), sr=16000, mono=True)[0], 16000)) for p in dev]
-    rows, seen, pool_fp = [], {}, []
+    rows, seen, pool_fp, unreadable = [], {}, [], []
     for cls in CLASSES:
         files = sorted(p for p in (pool / cls).glob("*") if p.suffix.lower() in AUDIO_EXT)
         for p in files:
@@ -131,10 +131,20 @@ def scan(a):
             if fid in seen:
                 sys.exit(f"Freesound id {fid} appears twice ({seen[fid]} and {p}); keep one copy")
             seen[fid] = p
-            info = sf.info(str(p)) if p.suffix.lower() in {".wav", ".flac", ".aiff", ".aif", ".ogg"} else None
-            raw, _ = librosa.load(str(p), sr=None, mono=False)    # original rate and channels: clipping is
-            clipped = float(np.mean(np.abs(raw) >= 0.999))        # measured before resampling blurs it
-            audio, _ = librosa.load(str(p), sr=SR, mono=True)
+            try:
+                try:
+                    info = sf.info(str(p))
+                except Exception:                                 # mp3, m4a or an odd WAV: read via librosa only
+                    info = None
+                raw, _ = librosa.load(str(p), sr=None, mono=False)    # original rate and channels: clipping is
+                clipped = float(np.mean(np.abs(raw) >= 0.999))        # measured before resampling blurs it
+                audio, _ = librosa.load(str(p), sr=SR, mono=True)
+                if len(audio) == 0:
+                    raise ValueError("no audio samples")
+            except Exception as e:
+                unreadable.append((p, str(e).splitlines()[0][:120]))
+                print(f"   SKIP {p.name}: unreadable ({unreadable[-1][1]})")
+                continue
             dur = len(audio) / SR
             dst = out32 / cls / f"{fid}.wav"
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -180,6 +190,12 @@ def scan(a):
         w = csv.DictWriter(fh, fieldnames=COLS)
         w.writeheader()
         w.writerows(rows)
+    if unreadable:
+        print(f"\n{len(unreadable)} file(s) could not be read and are NOT in the manifest:")
+        for p, why in unreadable:
+            print(f"   {p}  ({why})")
+        print("   Check each: an incomplete copy (re-copy it), or not really the format its name says "
+              "(re-export it as WAV, e.g. in Audacity). Then run scan again; verdicts already written are kept.")
     per = {c: sum(r["class"] == c for r in rows) for c in CLASSES}
     print(f"\nWrote {man} ({', '.join(f'{c} {n}' for c, n in per.items())}) and 32 kHz copies in {out32}")
     print("Next: listen, fill 'verdict' (keep / ambiguous / reject) and 'notes', then run split.")
