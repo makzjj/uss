@@ -1,0 +1,158 @@
+{
+  "locked": "2026-11-05T07:22:43",
+  "seed": 7,
+  "heldout_share": 0.5,
+  "rule": "Requirements v0.3.7 selection by listening",
+  "files": [
+    {
+      "class": "beeper",
+      "freesound_id": "196567",
+      "uploader": "tambascot",
+      "subset": "main",
+      "file": "196567__tambascot__truck-backup-beeps.wav",
+      "sha256_original": "5b104d6b54dc18924b94ef1071ba797dcfd6443e03ed39e966a5ed3d503c891b",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/beeper/196567.wav",
+      "sha256_32k": "111e2edf04f87b920442813f583ad3ac87289f0a35b492c183544c4cb4f70b39"
+    },
+    {
+      "class": "beeper",
+      "freesound_id": "459993",
+      "uploader": "florianreichelt",
+      "subset": "main",
+      "file": "459993__florianreichelt__drive-in-reverse-beep-alert-edited.m4a",
+      "sha256_original": "c44181976a2865a8de72a9bd42a89d77e11c7f126cc6686495490ca1c8ad2f34",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/beeper/459993.wav",
+      "sha256_32k": "65e3e6dc49c374f912c6e5119b9ce2a3d25e3fc11da0d5081ec64fbf7554c1f3"
+    },
+    {
+      "class": "beeper",
+      "freesound_id": "515039",
+      "uploader": "jusebago",
+      "subset": "main",
+      "file": "515039__jusebago__camioneta-retrocediendo-sobre-tierra-pickup-truck-backing-up-on-the-ground.wav",
+      "sha256_original": "784ec1d434df0e7edd151e4bc3001fcc418f07ac688fff0664bb79bf2b09f160",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/beeper/515039.wav",
+      "sha256_32k": "85b5055b32acf3940de7efdf2f75fe130dd0b549fa4880f94b27aa3130682917"
+    },
+    {
+      "class": "beeper",
+      "freesound_id": "523672",
+      "uploader": "martian",
+      "subset": "main",
+      "file": "523672__martian__oulander-reversing-beep-isolated.wav",
+      "sha256_original": "f7ee848ed1f95aaac4ad9b72a660849f0d4b4e95940603cdacab594678083883",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/beeper/523672.wav",
+      "sha256_32k": "7ff963a3cecc190ae876f29ebe8f2fe6e10af0d88bec02ba00bbbbe0330c0f2e"
+    },
+    {
+      "class": "beeper",
+      "freesound_id": "737206",
+      "uploader": "itinerantmonk108",
+      "subset": "main",
+      "file": "737206__itinerantmonk108__dump-truck-backing-up.wav",
+      "sha256_original": "572d53e8b8130db3273eac93fc9ef1021a6861662dbe69b2e3dbb00b1c0cc29d",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/beeper/737206.wav",
+      "sha256_32k": "300a5c37dc77b8409b6897ed6a8de89859a3caeb7d6cbf95905280b2e7fda1bc"
+    },
+    {
+      "class": "engine",
+      "freesound_id": "264870",
+      "uploader": "paulmessier",
+      "subset": "main",
+      "file": "264870__paulmessier__diesel-starting-and-idling.wav",
+      "sha256_original": "779d583edb27be50e91b598f94e36337c8980effd4e0f3af6df28e323e0ef58f",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/engine/264870.wav",
+      "sha256_32k": "fb1a7dbbd4925929ceeb07473b63dc11985f5b5141b951521576e2af31ceabd7"
+    },
+    {
+      "class": "engine",
+      "freesound_id": "448526",
+      "uploader": "frosswirevis",
+      "subset": "main",
+      "file": "448526__frosswirevis__industrial-truck-idle.wav",
+      "sha256_original": "547c17d63fe50fb37868020076139e64709d172647a43633ec789a2ffc9b74d0",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/engine/448526.wav",
+      "sha256_32k": "a1094774a389be041813d9772d1855dc09014faf3e7887ef08b2497787444e01"
+    },
+    {
+      "class": "engine",
+      "freesound_id": "481726",
+      "uploader": "craigsmith",
+      "subset": "main",
+      "file": "481726__craigsmith__r20-37-constant-fast-car-engine.wav",
+      "sha256_original": "c1f377ade7b027874625319116989a6a33379d0da751fcc961c673ef4d2e7292",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/engine/481726.wav",
+      "sha256_32k": "609ba8e3a652d68051bcaaf231672c512afc3c07e56772d5606fbfa95f86d233"
+    },
+    {
+      "class": "engine",
+      "freesound_id": "487161",
+      "uploader": "craigsmith",
+      "subset": "main",
+      "file": "487161__craigsmith__r19-48-old-large-truck-start-idle-out.wav",
+      "sha256_original": "dbd98fe45263696dc7db4afee14b65f7fd1e28e206793373c9b4d5a2143cb401",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/engine/487161.wav",
+      "sha256_32k": "47b7258035f0733e06d21e96d079088ae54c53458f07ab39a86be8844622e29e"
+    },
+    {
+      "class": "engine",
+      "freesound_id": "681645",
+      "uploader": "itinerantmonk108",
+      "subset": "main",
+      "file": "681645__itinerantmonk108__truck-idle.wav",
+      "sha256_original": "b12fa7738c58040688530b2ac4faee1474898d86ef0ec9cf61fb111dd29c8e65",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/engine/681645.wav",
+      "sha256_32k": "9d9468e73cb4e2c383d9b075f3e8c6dc5beeabe0cb7dda53797f78203c830725"
+    },
+    {
+      "class": "jackhammer",
+      "freesound_id": "31884",
+      "uploader": "dobroide",
+      "subset": "main",
+      "file": "31884__dobroide__20070228jackhammer.wav",
+      "sha256_original": "5b2a34c1c7090a6791f31a59785607e4b65ff0d0d3c3de3f21e217291e49d8a2",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/jackhammer/31884.wav",
+      "sha256_32k": "c0f246cf2387d4ee306654d780e9d2cc547dc8382c0eaf82ff598084a2ae494d"
+    },
+    {
+      "class": "jackhammer",
+      "freesound_id": "479535",
+      "uploader": "craigsmith",
+      "subset": "main",
+      "file": "479535__craigsmith__r05-20-construction-site.wav",
+      "sha256_original": "c6ae0d87912cfcc7b92f559dd1c427d0de907d2ba24248c394ee54f8665d76a0",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/jackhammer/479535.wav",
+      "sha256_32k": "21fbb47ea2bea6902cb9d66a2572a60e897ef02d989ee57c4900dbafc1b1e2ae"
+    },
+    {
+      "class": "jackhammer",
+      "freesound_id": "479555",
+      "uploader": "craigsmith",
+      "subset": "main",
+      "file": "479555__craigsmith__r16-24-construction-site-ambience.wav",
+      "sha256_original": "dad15ffde73484941c3cab45e5039b03171cc816f60ad69014ac99fa0c1ec6ba",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/jackhammer/479555.wav",
+      "sha256_32k": "920411d09cb998d0235a334ca4a32ece37eed9df6ad6c2a5fe95d111b835f913"
+    },
+    {
+      "class": "jackhammer",
+      "freesound_id": "570905",
+      "uploader": "engineer_815",
+      "subset": "main",
+      "file": "570905__engineer_815__jackhammer.wav",
+      "sha256_original": "b159a1fdeb92d14d0f6d90c4bb4411fe75a1d35ce8de56afd98604d32619c1d8",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/jackhammer/570905.wav",
+      "sha256_32k": "b843c5d45596922cbf6a6d99564bc586b5886875539261600cf0a0afdcd912bf"
+    },
+    {
+      "class": "jackhammer",
+      "freesound_id": "843980",
+      "uploader": "treblebooster",
+      "subset": "main",
+      "file": "843980__treblebooster__construction-006.wav",
+      "sha256_original": "6d8957c4743db7eb69793400e68a91417b5df4ac06f005cdd4b299d2b8dd38b0",
+      "file_32k": "/home/zmak002/docker_share/test_audio/freesound_pool_32k/jackhammer/843980.wav",
+      "sha256_32k": "d523938dfbf14d119e74888e4285032f26b500e81a2c7b5714d787aefe2d42ff"
+    }
+  ]
+}

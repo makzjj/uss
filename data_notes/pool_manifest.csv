@@ -1,0 +1,31 @@
+class,file,freesound_id,uploader,duration_s,orig_sr,orig_channels,clipped_frac,length_flag,dup_flag,possible_duplicate_of,dup_similarity,licence,pack,tags,verdict,notes
+beeper,196567__tambascot__truck-backup-beeps.wav,196567,tambascot,16.17,48000,1,2e-05,,,,0.645,,,,keep,listened: keep
+beeper,459993__florianreichelt__drive-in-reverse-beep-alert-edited.m4a,459993,florianreichelt,26.88,,,0.0,,check by ear,/home/zmak002/docker_share/test_audio/archive/pilot/engine3_snr0_bg2/target.wav,0.817,,,,keep,"listened: beeper only, no engine; match with 264870 is false. File is m4a (renamed from .wav)"
+beeper,513527__g_m_d_three__truck_backing_up_04_14_2020_010.wav,513527,g_m_d_three,22.66,48000,2,0.0,,,,0.44,,,,keep,listened: keep
+beeper,515039__jusebago__camioneta-retrocediendo-sobre-tierra-pickup-truck-backing-up-on-the-ground.wav,515039,jusebago,24.45,44100,1,0.0,,,,0.562,,,,keep,listened: keep
+beeper,523413__c-v__backing-up-beep.wav,523413,c-v,21.1,48000,2,0.0,,,,0.445,,,,keep,listened: keep
+beeper,523672__martian__oulander-reversing-beep-isolated.wav,523672,martian,8.94,48000,1,0.0,,,,0.162,,,,keep,listened: keep
+beeper,555376__moveawaypodcast__truck-backing-up.m4a,555376,moveawaypodcast,50.94,,,0.0,,check by ear,/home/zmak002/docker_share/test_audio/archive/pilot/separated_results/dog/level=2/Wild animals.wav,0.794,,,,keep,file is m4a (renamed from .wav)
+beeper,737206__itinerantmonk108__dump-truck-backing-up.wav,737206,itinerantmonk108,11.65,48000,1,0.0,,,,0.466,,,,keep,listened: keep
+beeper,8457__eldadtsabary__tractor-reversing-in-the-park.mp3,8457,eldadtsabary,36.28,44100,2,0.0,,,,0.444,,,,keep,Pixabay re-encode (mp3) of Freesound 8457
+beeper,877127__adamdavidsmith__truck-beeping.wav,877127,adamdavidsmith,14.37,44100,2,0.0,,,,0.529,,,,keep,listened: keep
+engine,264870__paulmessier__diesel-starting-and-idling.wav,264870,paulmessier,30.65,44100,2,0.0,,check by ear,pool: 459993__florianreichelt__drive-in-reverse-beep-alert-edited.m4a,0.879,,,,keep,"check by ear vs 459993 (pool): listened, no shared content (false match)"
+engine,448526__frosswirevis__industrial-truck-idle.wav,448526,frosswirevis,61.66,44100,2,2e-05,,check by ear,/home/zmak002/docker_share/test_audio/archive/pilot/separated_results/mixture/level=2/Tools.wav,0.764,,,,keep,"check by ear: listened, different recording"
+engine,481726__craigsmith__r20-37-constant-fast-car-engine.wav,481726,craigsmith,29.64,48000,1,0.0,,,,0.749,,,,keep,listened: keep
+engine,487161__craigsmith__r19-48-old-large-truck-start-idle-out.wav,487161,craigsmith,96.97,48000,1,0.0,,,,0.734,,,,keep,listened: keep
+engine,498954__16f_panska_kopcil_adam__5engine-idling.wav,498954,16f_panska_kopcil_adam,23.92,48000,2,0.0,,check by ear,/home/zmak002/docker_share/test_audio/archive/pilot/separated_results/mixture/level=2/Tools.wav,0.844,,,,keep,"check by ear: listened, different recording"
+engine,546740__ithoanglong26__isuzu-diesel-engine-sound.mp3,546740,ithoanglong26,52.45,44100,2,0.0,,check by ear,/home/zmak002/docker_share/test_audio/archive/pilot/separated_results/dog/level=2/Wild animals.wav,0.816,,,,keep,file is mp3 (renamed from .wav)
+engine,642017__sound_and_fury__truck-starting.wav,642017,sound_and_fury,33.0,48000,2,0.0,,check by ear,/home/zmak002/docker_share/test_audio/archive/pilot/engine3.wav,0.86,,,,keep,"check by ear vs engine3.wav: different recording, similar engine rumble frequency"
+engine,681645__itinerantmonk108__truck-idle.wav,681645,itinerantmonk108,35.41,48000,2,0.0,,,,0.237,,,,keep,listened: keep
+engine,688907__geoff-bremner-audio__construction-vehicle-idle-3.wav,688907,geoff-bremner-audio,63.0,44100,2,0.0,,check by ear,/home/zmak002/docker_share/test_audio/archive/pilot/separated_results/mixture/level=2/Tools.wav,0.809,,,,keep,"check by ear: listened, different recording"
+engine,811898__sounds_from_palestine__2006-peugeot-engine-sound.wav,811898,sounds_from_palestine,66.0,48000,2,0.0,,check by ear,/home/zmak002/docker_share/test_audio/archive/pilot/engine3.wav,0.879,,,,keep,"check by ear vs engine3.wav: different recording, similar engine rumble frequency"
+jackhammer,180937__aerror__construction_site_edited.m4a,180937,aerror,27.58,,,0.0,,,,0.671,,,,keep,listened: keep
+jackhammer,188823__unfa__pneumatic-hammer-vs-concrete-floor-direct-louder_edited.m4a.m4a,188823,unfa,37.89,,,0.0,,,,0.722,,,,keep,listened: keep
+jackhammer,31884__dobroide__20070228jackhammer.wav,31884,dobroide,25.51,44100,2,0.0,,,,0.734,,,,keep,listened: keep
+jackhammer,479535__craigsmith__r05-20-construction-site.wav,479535,craigsmith,74.2,48000,1,0.0,,check by ear,/home/zmak002/docker_share/test_audio/archive/pilot/separated_results/dog/level=2/Wild animals.wav,0.807,,,,keep,"check by ear: listened, different recording"
+jackhammer,479555__craigsmith__r16-24-construction-site-ambience.wav,479555,craigsmith,48.34,48000,1,0.0,,,,0.716,,,,keep,listened: keep
+jackhammer,490974__klangfabrik__jackhammer-on-concrete.wav,490974,klangfabrik,12.95,44100,2,0.0,,same recording,/home/zmak002/docker_share/test_audio/archive/pilot/engine3.wav,0.922,,,,keep,"check by ear vs engine3.wav: listened, different recording (false match)"
+jackhammer,570905__engineer_815__jackhammer.wav,570905,engineer_815,566.88,44100,2,0.0,,check by ear,/home/zmak002/docker_share/test_audio/archive/pilot/mix_snr10/target.wav,0.8,,,,keep,"check by ear: listened, different recording"
+jackhammer,708042__mycompasstv__jack-hammers.wav,708042,mycompasstv,30.03,48000,2,0.0,,check by ear,/home/zmak002/docker_share/test_audio/archive/pilot/engine3_snr0_bg2/target.wav,0.777,,,,keep,"check by ear: listened, different recording"
+jackhammer,843980__treblebooster__construction-006.wav,843980,treblebooster,127.53,44100,2,0.0,,,,0.603,,,,keep,listened: keep
+jackhammer,98859__tomlija__jackhammer_edited.wav,98859,tomlija,15.34,,,0.0,,,,0.417,,,,keep,file is m4a (renamed from .wav)
