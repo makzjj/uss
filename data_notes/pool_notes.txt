@@ -1,0 +1,8 @@
+Removed from the pool before splitting (found by the scan's duplicate check, confirmed by ear):
+- 317361__mrauralization__jackhammer: same recording as old_example_jackhammer2.wav (1.00)
+- 268054__klangfabrik__interiorjackhammers02: same recording as target.wav (0.92)
+- 271662__honorhunter: same recording as dev source jackhammer_t4.wav (0.97)
+- 429818__spinopel: same recording as dev source jackhammer_t2.wav (1.00)
+Provenance learned: dev jackhammer_t2 = Freesound 429818 (spinopel); jackhammer_t4 = Freesound 271662 (honorhunter).
+No other clips by spinopel or honorhunter are in the pool.
+All 30 remaining clips listened to and kept. Split by uploader (seed 7): 5 held-out + 5 dev_extra per class.
