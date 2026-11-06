@@ -1,0 +1,193 @@
+{
+  "t1": {
+    "beeper": 0.10036,
+    "engine": 0.18122,
+    "jackhammer": 0.02912
+  },
+  "t2": {
+    "beeper": null,
+    "engine": null,
+    "jackhammer": 0.02521
+  },
+  "t2_one_step_up": {
+    "beeper": null,
+    "engine": null,
+    "jackhammer": 0.05703
+  },
+  "thr_single": {
+    "beeper": 0.10036,
+    "engine": 0.2307,
+    "jackhammer": 0.02912
+  },
+  "allowed_false_alarms": {
+    "beeper": 0,
+    "engine": 3,
+    "jackhammer": 0
+  },
+  "false_alarms_at_t1": {
+    "beeper": 0,
+    "engine": 3,
+    "jackhammer": 0
+  },
+  "offline": {
+    "single": {
+      "delta_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 4.999999999999993,
+        "overlap": 3.3333333333333326
+      },
+      "fixes": 6,
+      "regressions": 1,
+      "false_alarms": {
+        "beeper": 0,
+        "engine": 3,
+        "jackhammer": 0
+      }
+    },
+    "two": {
+      "delta_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 3.3333333333333326,
+        "overlap": 1.6666666666666718
+      },
+      "fixes": 3,
+      "regressions": 0,
+      "false_alarms": {
+        "beeper": 0,
+        "engine": 3,
+        "jackhammer": 0
+      }
+    },
+    "two_t2_one_step_up": {
+      "delta_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 1.6666666666666607,
+        "overlap": 1.6666666666666718
+      },
+      "fixes": 2,
+      "regressions": 0,
+      "false_alarms": {
+        "beeper": 0,
+        "engine": 3,
+        "jackhammer": 0
+      }
+    },
+    "two_finite_t2_queries": {
+      "delta_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 3.3333333333333326,
+        "overlap": 1.6666666666666718
+      },
+      "fixes": 3,
+      "regressions": 0,
+      "false_alarms": {
+        "beeper": 0,
+        "engine": 3,
+        "jackhammer": 0
+      }
+    }
+  },
+  "final_query_classes": [
+    "jackhammer"
+  ],
+  "scheduled": {
+    "single threshold": {
+      "delta_mean_pp": {
+        "ebr0": -0.13333333333333372,
+        "ebr-5": 4.066666666666663,
+        "overlap": 2.408333333333335
+      },
+      "delta_p5_pp": {
+        "ebr0": -1.6666666666666718,
+        "ebr-5": 3.250000000000001,
+        "overlap": 0.0
+      },
+      "delta_p95_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 4.999999999999993,
+        "overlap": 3.3333333333333326
+      },
+      "fixes_mean": 5.645,
+      "regressions_mean": 1.84,
+      "regressions_max": 4,
+      "jobs_done_mean": 96.48,
+      "jobs_wanted": 124,
+      "false_alarms_worst_order": {
+        "beeper": 0,
+        "engine": 3,
+        "jackhammer": 0
+      }
+    },
+    "two thresholds": {
+      "delta_mean_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 3.1666666666666656,
+        "overlap": 1.6083333333333383
+      },
+      "delta_p5_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 1.6666666666666607,
+        "overlap": 1.6666666666666718
+      },
+      "delta_p95_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 3.3333333333333326,
+        "overlap": 1.6666666666666718
+      },
+      "fixes_mean": 2.865,
+      "regressions_mean": 0.0,
+      "regressions_max": 0,
+      "jobs_done_mean": 100.49,
+      "jobs_wanted": 124,
+      "false_alarms_worst_order": {
+        "beeper": 0,
+        "engine": 3,
+        "jackhammer": 0
+      }
+    },
+    "two thresholds, finite-t2 queries": {
+      "delta_mean_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 3.325,
+        "overlap": 1.6666666666666716
+      },
+      "delta_p5_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 3.3333333333333326,
+        "overlap": 1.6666666666666718
+      },
+      "delta_p95_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 3.3333333333333326,
+        "overlap": 1.6666666666666718
+      },
+      "fixes_mean": 2.995,
+      "regressions_mean": 0.0,
+      "regressions_max": 0,
+      "jobs_done_mean": 72.065,
+      "jobs_wanted": 84,
+      "false_alarms_worst_order": {
+        "beeper": 0,
+        "engine": 3,
+        "jackhammer": 0
+      }
+    }
+  },
+  "args": {
+    "test_set": "/home/zmak002/docker_share/test_audio/testsets/gate1_v2",
+    "policy": "kmax",
+    "lo": 0.1002,
+    "exclude": [
+      "beeper"
+    ],
+    "t_query_csv": "results/s4_sed_cores_20261104-235255/s4_sed_cores_k1_query_times.csv",
+    "t_plan": 9.46,
+    "score_delay_s": 3.32,
+    "sed_s": 0.66,
+    "ttl_s": 60.0,
+    "max_wait": 1,
+    "orders": 200,
+    "seed": 0,
+    "onset_rel": 0.5
+  }
+}
