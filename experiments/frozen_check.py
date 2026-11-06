@@ -22,7 +22,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from gate_analysis import load  # noqa: E402
 from schedule_sim import NAMES, gate_masks  # noqa: E402
-from score_events import CONDITIONS, evaluate  # noqa: E402
+from score_events import CONDITIONS, evaluate, in_window  # noqa: E402
 
 
 def main():
@@ -30,6 +30,8 @@ def main():
     ap.add_argument("--test_set", required=True)
     ap.add_argument("--frozen", default="results/gate1_v2_two_threshold.json")
     ap.add_argument("--onset_rel", type=float, default=0.5)
+    ap.add_argument("--list_fa", action="store_true",
+                    help="list every false alarm (SED alone and frozen design) and write a listening sheet CSV")
     ap.add_argument("--reproduce_dev", action="store_true",
                     help="run on the development set only to confirm this script reproduces two_threshold.py")
     a = ap.parse_args()
@@ -71,14 +73,16 @@ def main():
                 out[s][c] = row
         return out
 
-    res = {}
+    res, all_dets = {}, {}
     for name, use in (("SED alone (t1)", False), ("frozen design", True)):
         d = dets(use)
-        hits, fa = {}, {}
+        all_dets[name] = d
+        hits, fa, fa_clip = {}, {}, {}
         for s in NAMES:
             h, f = evaluate(d[s], gts[s], 1.0)
-            hits[s], fa[s] = h, sum(f.values())
+            hits[s], fa[s], fa_clip[s] = h, sum(f.values()), f
         res[name] = (hits, fa)
+        all_dets[name + " fa_by_clip"] = fa_clip
     base_h, base_fa = res["SED alone (t1)"]
     des_h, des_fa = res["frozen design"]
     subset = lambda c: manifest[c].get("target_subset") or "main"  # noqa: E731
@@ -120,6 +124,44 @@ def main():
     print("\n   false alarms (all clips): SED alone " + ", ".join(f"{s} {base_fa[s]}" for s in NAMES)
           + "; frozen design " + ", ".join(f"{s} {des_fa[s]}" for s in NAMES)
           + "; added " + ", ".join(f"{s} {added[s]:+d}" for s in NAMES))
+    if a.list_fa:
+        import csv
+        rows = []
+        sed_fc, des_fc = all_dets["SED alone (t1) fa_by_clip"], all_dets["frozen design fa_by_clip"]
+        print("\n   False alarms, clip by clip (listen at the given seconds; a detection counts as a false alarm when it "
+              "is outside the clip's own target event or the clip has no event of that class):")
+        for s in NAMES:
+            for c in clips:
+                n_sed, n_des = sed_fc[s].get(c, 0), des_fc[s].get(c, 0)
+                if not (n_sed or n_des):
+                    continue
+                who = "SED alone and design" if n_sed and n_des >= n_sed else ("added by USS" if not n_sed else "SED alone")
+                wins = []
+                for k, (score, t) in enumerate(all_dets["frozen design"][s][c]):
+                    if score < 1.0 or (c in gts[s] and in_window(t, gts[s][c])):
+                        continue
+                    from_uss = (c, k, s) in done and np.isfinite(t2[s]) and U[s][c][k][0] / t2[s] >= score - 1e-12 \
+                        and U[s][c][k][0] / t2[s] > B[s][c][k][0] / t1[s]
+                    wins.append({"piece": k, "listen_s": f"{2 * k:.0f}-{2 * k + 2:.0f}", "event_time_s": round(t, 2),
+                                 "sed_score": round(B[s][c][k][0], 4),
+                                 "uss_score": round(U[s][c][k][0], 4) if (c, k, s) in done else "",
+                                 "crossed": "USS (t2)" if from_uss else "SED (t1)"})
+                r = manifest[c]
+                print(f"   {s:10} {c}  [{r['contains']}, {r['condition']}]  {who}")
+                for w in wins:
+                    print(f"        listen {w['listen_s']} s: SED {w['sed_score']:.4f} (t1 {t1[s]:.4f})"
+                          + (f", USS {w['uss_score']:.4f} (t2 {t2[s]:.4f})" if w["uss_score"] != "" else "")
+                          + f"  -> crossed by {w['crossed']}")
+                    rows.append({"class": s, "clip": c, "clip_contains": r["contains"], "condition": r["condition"],
+                                 "target_recording": r.get("target_source", ""), "background": r.get("background", ""),
+                                 "counted_in": who, **w, "listen_verdict": "", "notes": ""})
+        sheet = Path(f"results/frozen_check_{ts.name}_false_alarms.csv")
+        if rows:
+            with open(sheet, "w", newline="", encoding="utf-8") as fh:
+                w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+                w.writeheader()
+                w.writerows(rows)
+            print(f"   Listening sheet: {sheet} (fill listen_verdict: 'real <class>' if that class is audibly there, else 'false alarm')")
     n_fix_main = len(summary.get("main", {}).get("fixes", []))
     holds = n_fix_main >= 1 and all(added[s] <= slack[s] for s in NAMES)
     if a.reproduce_dev:
