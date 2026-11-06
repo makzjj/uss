@@ -1,0 +1,21 @@
+{
+  "made": "2026-11-06T08:43:37",
+  "dev_set": "/home/zmak002/docker_share/test_audio/testsets/devplus_v1",
+  "frozen": "data_notes/frozen_design_v0_3_10.json",
+  "frozen_sha256": "b593e3c2a3b4c44b656dee059105f17f25c50b185cfb886b6358991c0f46b3ed",
+  "anchor": {
+    "beeper": 2,
+    "engine": 4,
+    "jackhammer": 0
+  },
+  "always_on_single_threshold": {
+    "beeper": 0.23405,
+    "engine": 0.38229,
+    "jackhammer": 0.04537
+  },
+  "always_on_two_thresholds_t2": {
+    "beeper": 0.25255,
+    "engine": null,
+    "jackhammer": 0.04537
+  }
+}

@@ -1,0 +1,193 @@
+{
+  "t1": {
+    "beeper": 0.17969,
+    "engine": 0.19305,
+    "jackhammer": 0.02801
+  },
+  "t2": {
+    "beeper": null,
+    "engine": null,
+    "jackhammer": 0.05703
+  },
+  "t2_one_step_up": {
+    "beeper": null,
+    "engine": null,
+    "jackhammer": 0.06075
+  },
+  "thr_single": {
+    "beeper": 0.17969,
+    "engine": 0.38229,
+    "jackhammer": 0.03465
+  },
+  "allowed_false_alarms": {
+    "beeper": 2,
+    "engine": 4,
+    "jackhammer": 0
+  },
+  "false_alarms_at_t1": {
+    "beeper": 2,
+    "engine": 4,
+    "jackhammer": 0
+  },
+  "offline": {
+    "single": {
+      "delta_pp": {
+        "ebr0": -8.148148148148149,
+        "ebr-5": -9.629629629629626,
+        "overlap": -6.6666666666666705
+      },
+      "fixes": 3,
+      "regressions": 36,
+      "false_alarms": {
+        "beeper": 2,
+        "engine": 4,
+        "jackhammer": 0
+      }
+    },
+    "two": {
+      "delta_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 0.7407407407407418,
+        "overlap": 1.481481481481478
+      },
+      "fixes": 3,
+      "regressions": 0,
+      "false_alarms": {
+        "beeper": 2,
+        "engine": 4,
+        "jackhammer": 0
+      }
+    },
+    "two_t2_one_step_up": {
+      "delta_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 0.0,
+        "overlap": 1.481481481481478
+      },
+      "fixes": 2,
+      "regressions": 0,
+      "false_alarms": {
+        "beeper": 2,
+        "engine": 4,
+        "jackhammer": 0
+      }
+    },
+    "two_finite_t2_queries": {
+      "delta_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 0.7407407407407418,
+        "overlap": 1.481481481481478
+      },
+      "fixes": 3,
+      "regressions": 0,
+      "false_alarms": {
+        "beeper": 2,
+        "engine": 4,
+        "jackhammer": 0
+      }
+    }
+  },
+  "final_query_classes": [
+    "jackhammer"
+  ],
+  "scheduled": {
+    "single threshold": {
+      "delta_mean_pp": {
+        "ebr0": -9.411111111111113,
+        "ebr-5": -9.81481481481481,
+        "overlap": -7.303703703703705
+      },
+      "delta_p5_pp": {
+        "ebr0": -10.370370370370363,
+        "ebr-5": -10.370370370370368,
+        "overlap": -8.148148148148149
+      },
+      "delta_p95_pp": {
+        "ebr0": -8.888888888888891,
+        "ebr-5": -9.629629629629626,
+        "overlap": -6.6666666666666705
+      },
+      "fixes_mean": 2.575,
+      "regressions_mean": 38.39,
+      "regressions_max": 41,
+      "jobs_done_mean": 201.03,
+      "jobs_wanted": 295,
+      "false_alarms_worst_order": {
+        "beeper": 2,
+        "engine": 4,
+        "jackhammer": 0
+      }
+    },
+    "two thresholds": {
+      "delta_mean_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 0.6666666666666677,
+        "overlap": 1.3555555555555516
+      },
+      "delta_p5_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 0.0,
+        "overlap": 0.7407407407407363
+      },
+      "delta_p95_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 0.7407407407407418,
+        "overlap": 1.481481481481478
+      },
+      "fixes_mean": 2.73,
+      "regressions_mean": 0.0,
+      "regressions_max": 0,
+      "jobs_done_mean": 217.115,
+      "jobs_wanted": 294,
+      "false_alarms_worst_order": {
+        "beeper": 2,
+        "engine": 4,
+        "jackhammer": 0
+      }
+    },
+    "two thresholds, finite-t2 queries": {
+      "delta_mean_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 0.7407407407407419,
+        "overlap": 1.4814814814814776
+      },
+      "delta_p5_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 0.7407407407407418,
+        "overlap": 1.481481481481478
+      },
+      "delta_p95_pp": {
+        "ebr0": 0.0,
+        "ebr-5": 0.7407407407407418,
+        "overlap": 1.481481481481478
+      },
+      "fixes_mean": 3.0,
+      "regressions_mean": 0.0,
+      "regressions_max": 0,
+      "jobs_done_mean": 141.535,
+      "jobs_wanted": 169,
+      "false_alarms_worst_order": {
+        "beeper": 2,
+        "engine": 4,
+        "jackhammer": 0
+      }
+    }
+  },
+  "args": {
+    "test_set": "/home/zmak002/docker_share/test_audio/testsets/devplus_v1",
+    "policy": "kmax",
+    "lo": 0.1002,
+    "exclude": [
+      "beeper"
+    ],
+    "t_query_csv": "results/s4_sed_cores_20261104-235255/s4_sed_cores_k1_query_times.csv",
+    "t_plan": 9.46,
+    "score_delay_s": 3.32,
+    "sed_s": 0.66,
+    "ttl_s": 60.0,
+    "max_wait": 1,
+    "orders": 200,
+    "seed": 0,
+    "onset_rel": 0.5
+  }
+}
