@@ -112,15 +112,40 @@ def main():
         c, k = win_map[o["window"]]
         done[(c, k, o["class"])] = (o["score"], onset_time(k * HOP, " ".join(str(v) for v in o["frames"]), a.onset_rel))
 
+    two = cfg.get("two_threshold")
+    thr, thr_sed, allowed = cfg["thresholds_frozen"], cfg["thresholds_sed_only"], cfg["allowed_false_alarms"]
+
     def pipeline(uss_scores):
+        if two:                                     # max(B/t1, U/t2 where a result arrived in time), threshold 1.0
+            t1, t2 = two["t1"], two["t2"]
+            out = {}
+            for s in NAMES:
+                out[s] = {}
+                for c in clips:
+                    row = []
+                    for k in range(n_hops):
+                        b = B[s][c][k]
+                        cand = (b[0] / t1[s], b[1])
+                        if (c, k, s) in done and t2[s] is not None:
+                            u = uss_scores(c, k, s)
+                            if u[0] / t2[s] > cand[0]:
+                                cand = (u[0] / t2[s], u[1])
+                        row.append(cand)
+                    out[s][c] = row
+            return out
         return {s: {c: [(uss_scores(c, k, s) if (c, k, s) in done and uss_scores(c, k, s)[0] > B[s][c][k][0]
                          else B[s][c][k]) for k in range(n_hops)] for c in clips} for s in NAMES}
 
     measured = pipeline(lambda c, k, s: done[(c, k, s)])
     fp32 = pipeline(lambda c, k, s: U_srv[s][c][k])
-    thr, thr_sed, allowed = cfg["thresholds_frozen"], cfg["thresholds_sed_only"], cfg["allowed_false_alarms"]
+    if two:
+        thr = {s: 1.0 for s in NAMES}               # the ratios above already carry t1 and t2
     base_hits = {s: evaluate(B[s], gts[s], thr_sed[s])[0] for s in NAMES}
-    events = [(s, c) for s in NAMES for c in gts[s]]
+    subset = lambda c: manifest[c].get("target_subset") or "main"  # noqa: E731
+    events = [(s, c) for s in NAMES for c in gts[s] if subset(c) == "main"]      # main subset only
+    n_amb = sum(1 for s in NAMES for c in gts[s] if subset(c) != "main")
+    st_set = json.loads((ts / "settings.json").read_text()) if (ts / "settings.json").exists() else {}
+    is_heldout = st_set.get("target_set") == "heldout" or "heldout" in ts.name.lower()
 
     def score(dets, thresholds):
         hits, fa = {}, {}
@@ -146,7 +171,15 @@ def main():
                for cond in CONDITIONS}
     print(f"   {'SED only (Pi), absolute recall':32} " + " / ".join(f"{sed_abs[c]:.1f}%" for c in CONDITIONS)
           + "   (baseline)   false alarms " + ", ".join(f"{s} {sed_fa[s]}" for s in NAMES))
-    over = [s for s in NAMES if res["Pi measured (INT8 USS, Pi SED)"][3][s] > allowed[s]]
+    if n_amb:
+        print(f"   ({n_amb} ambiguity-subset events reported separately are not in these rows)")
+    if two:                                         # two-threshold rule: compare with SED alone at t1
+        over = [s for s in NAMES if res["Pi measured (INT8 USS, Pi SED)"][3][s] > sed_fa[s]]
+        if over:
+            print(f"   NOTE: false alarms added over SED alone at t1 for {', '.join(over)}")
+        over = []
+    else:
+        over = [s for s in NAMES if res["Pi measured (INT8 USS, Pi SED)"][3][s] > allowed[s]]
     if over:
         print(f"   NOTE: false alarms above the allowed count for {', '.join(over)}")
 
@@ -197,13 +230,26 @@ def main():
            f"--exclude {' '.join(g['never_gated'])} --ttl_s {cfg['queue']['ttl_s']:g} --max_wait {cfg['queue']['max_wait']} "
            f"--sed_s {cfg['sed_p95_s']:g}" + (" --skip_alerting" if g["skip_alerting"] else "")
            + f" --t_query_csv {q_csv} --t_plan {plan:.2f}{delay}")   # plan exactly as the Pi queue did
+    if two:
+        print("\nTwo-threshold design: compare with heldout_eval.py's / two_threshold.py's scheduled numbers for this set. "
+              + ("Held-out data." if is_heldout else "Development data (in-sample)."))
+        out = Path(f"results/s4_score_{run_dir.name}.json")
+        out.write_text(json.dumps({"run": str(run_dir), "design": design, "two_threshold": True,
+                                   "heldout": is_heldout, "ambiguity_events_excluded": n_amb,
+                                   "checks_failed": problems, "force_reason": a.reason,
+                                   "recall": {k: {"delta_pp": v[0], "fixes": v[1], "regressions": v[2],
+                                                  "false_alarms": v[3]} for k, v in res.items()},
+                                   "jobs": dict(st), "jobs_all_results_in_time": in_time_jobs, "p1_s": p1},
+                                  indent=2, default=float))
+        print(f"Saved {out}")
+        return
     print("\nPrediction for this order with the Pi's measured per-query times (compare with the job counts above):")
     print(f"   {cmd}")
     print("   It runs the S4 order with 100 draws of the measured times: the Pi's 'every result in time' count should "
           "fall inside its 5-95% range.")
     print("   For the design comparison, run the same command without --order_file (200 random orders).")
     print("Note: thresholds were frozen on FP32 USS + PyTorch SED; this run used INT8 USS + ONNX SED. "
-          "In-sample on the dev set.")
+          + ("Held-out data." if is_heldout else "Development data (in-sample)."))
 
     out = Path(f"results/s4_score_{run_dir.name}.json")
     out.write_text(json.dumps({

@@ -10,6 +10,8 @@ Plays results/s4/stream.flac (the 220 dev clips end to end) as if a microphone h
                            its PLANNED finish is past the deadline; before starting, a waiting job expires if its
                            planned finish is now past the deadline; a running job is never cancelled, and a
                            result after the deadline is late (logged, not counted).
+  Two-threshold design (s4_prepare.py --frozen): skip and stage-1 at t1, queries only for the frozen query classes;
+  scoring (s4_score.py) counts a USS result only if it reaches t2.
   --score_on core3         the USS process also runs the SED (1 thread) on each separated output
   --score_on sed_cores     each separated output goes to the SED process as soon as it is separated; the SED
                            scores at most one per hop, right after that hop's main window (so the main window is
@@ -136,6 +138,8 @@ def sed_proc(a, cfg, out, ready, start_evt, t0_val, jobs_q, outs_q, n_win):
         over = [s for s in gated_cls if scores[s] >= gate["lo"]]          # as schedule_sim.gate_masks
         want = (gated_cls if over else []) if gate["policy"] == "kmax" else over
         fired = [s for s in want if not (gate["skip_alerting"] and scores[s] >= thr[s])]   # skip: already alerting
+        if cfg.get("two_threshold"):                           # frozen design: query only classes with finite t2
+            fired = [s for s in fired if s in cfg["two_threshold"]["query_classes"]]
         if fired:
             jobs_q.put({"job": k, "window": k, "classes": fired, "arrive": t2 - t0,
                         "deadline": k * hop_s + cfg["queue"]["ttl_s"] * a.time_scale,
@@ -325,7 +329,7 @@ def main():
     t0_val.value = time.monotonic() + 1.0
     start_evt.set()
     print(f"S4 {a.score_on}: {n_win} windows, about {n_win * 2 * a.time_scale / 60:.1f} min, "
-          f"{mem_free:.0f} MB free at start, {temp():.1f} C. Log in {out}")
+          f"{(f'{mem_free:.0f}' if mem_free is not None else 'unknown')} MB free at start, {temp():.1f} C. Log in {out}")
 
     mon = Log(out / "monitor.jsonl")
     last_vc, throttled = -1e9, ""
@@ -370,7 +374,10 @@ def main():
         "mem_available_min_mb": min((m["mem_available_mb"] for m in mon_rows if m["mem_available_mb"]), default=None),
     }
     clean = [t for t in summary["throttled_seen"] if t]
-    summary["valid_run"] = all(t.endswith("0x0") for t in clean) and (summary["freq_min_mhz"] or 0) >= 1700
+    fmax = max((int(read_sys(f"/sys/devices/system/cpu/cpu{i}/cpufreq/cpuinfo_max_freq", "0")) / 1000
+                for i in range(4)), default=0) or 1800.0
+    summary["freq_board_max_mhz"] = fmax
+    summary["valid_run"] = all(t.endswith("0x0") for t in clean) and (summary["freq_min_mhz"] or 0) >= 0.95 * fmax
     run = {"summary": summary, "args": vars(a), "config": cfg, "time_scale": a.time_scale,
            "hashes": {"sed_onnx": sha256(a.sed_onnx), "uss_onnx": sha256(a.uss_onnx),
                       "stream": sha256(s4 / "stream.flac"), "config": sha256(s4 / "s4_config.json")},
@@ -387,8 +394,9 @@ def main():
           f"max {summary['sed_start_delay_ms']['max']:.0f} ms")
     print(f"Alignment vs server scores: max {summary['alignment_max_abs_vs_server']:.1e} "
           f"({'OK' if ok_align else 'NOT OK: windows may be misaligned; do not score this run'})")
+    mem_txt = (f"{summary['mem_available_min_mb']:.0f}" if summary["mem_available_min_mb"] is not None else "unknown")
     print(f"Temperature max {summary['temp_max_c']} C; throttled {summary['throttled_seen']}; lowest clock "
-          f"{summary['freq_min_mhz']} MHz; lowest free memory {summary['mem_available_min_mb']:.0f} MB; "
+          f"{summary['freq_min_mhz']} MHz (board max {fmax:.0f}); lowest free memory {mem_txt} MB; "
           f"valid run: {summary['valid_run']}")
     print(f"Copy {out} to the server and run experiments/s4_score.py on it.")
 

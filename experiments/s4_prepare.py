@@ -53,6 +53,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--test_set", default=f"{TA}/testsets/gate1_v2")
     ap.add_argument("--out", default="results/s4")
+    ap.add_argument("--frozen", default="",
+                    help="frozen two-threshold design (two_threshold.py JSON): thresholds, gate, query classes and queue "
+                         "settings are taken from it, NEVER computed from this set's clips (required for a held-out "
+                         "stream, which also needs run_gate1.py results for its alignment scores)")
     ap.add_argument("--seed", type=int, default=2026)
     ap.add_argument("--policy", choices=["k1", "kmax"], default="kmax")
     ap.add_argument("--lo", type=float, default=0.1002)
@@ -77,13 +81,34 @@ def main():
     B = {s: seq[(s, "before")] for s in NAMES}
     U = {s: seq[(s, "after")] for s in NAMES}
 
-    # ---------- frozen thresholds, exactly as schedule_sim.py ----------
-    gate_classes = [s for s in NAMES if s not in a.exclude]
-    anchor = {s: sum(evaluate(B[s], gts[s], USS_THRESHOLD)[1].values()) for s in NAMES}
-    thr_sed = {s: match(B[s], gts[s], anchor[s])[0] for s in NAMES}
-    mask = gate_masks(B, clips, a.lo, a.policy, gate_classes)
-    off = {s: gated(B[s], U[s], mask[s]) for s in NAMES}
-    thr = {s: match(off[s], gts[s], anchor[s])[0] for s in NAMES}
+    st = json.loads((ts / "settings.json").read_text()) if (ts / "settings.json").exists() else {}
+    heldout = st.get("target_set") == "heldout" or "heldout" in ts.name.lower()
+    two = None
+    if a.frozen:
+        fz = json.loads(Path(a.frozen).read_text())
+        g = fz["args"]
+        if a.no_skip_alerting:
+            sys.exit("--no_skip_alerting is not the frozen design (it skips classes already alerting at t1)")
+        a.policy, a.lo, a.exclude = g["policy"], g["lo"], g["exclude"]
+        a.ttl_s, a.max_wait, a.sed_s, a.t_plan_sep = g["ttl_s"], g["max_wait"], g["sed_s"], g["t_plan"]   # frozen queue
+        t2 = {s: fz["t2"][s] for s in NAMES}
+        qcls = fz.get("final_query_classes", [s for s in NAMES if t2[s] is not None])
+        two = {"t1": fz["t1"], "t2": t2, "query_classes": qcls, "frozen_file": a.frozen,
+               "frozen_sha256": sha256(a.frozen)}
+        thr = thr_sed = fz["t1"]                       # stage-1 and skip rule at t1
+        anchor = fz["allowed_false_alarms"]
+        print(f"Thresholds from the frozen design {a.frozen} (not computed from {ts.name}): t1 {fz['t1']}, t2 {t2}, "
+              f"queries {qcls}")
+    else:
+        if heldout:
+            sys.exit(f"{ts.name} is held-out data: thresholds must come from the frozen design (--frozen)")
+        # ---------- frozen thresholds, exactly as schedule_sim.py (single-threshold design) ----------
+        gate_classes = [s for s in NAMES if s not in a.exclude]
+        anchor = {s: sum(evaluate(B[s], gts[s], USS_THRESHOLD)[1].values()) for s in NAMES}
+        thr_sed = {s: match(B[s], gts[s], anchor[s])[0] for s in NAMES}
+        mask = gate_masks(B, clips, a.lo, a.policy, gate_classes)
+        off = {s: gated(B[s], U[s], mask[s]) for s in NAMES}
+        thr = {s: match(off[s], gts[s], anchor[s])[0] for s in NAMES}
 
     # ---------- stream ----------
     order = list(np.random.default_rng(a.seed).permutation(clips))
@@ -126,6 +151,7 @@ def main():
     config = {
         "class_ids": {s: SOUNDS[s][0] for s in NAMES},
         "gate": {"policy": a.policy, "lo": a.lo, "never_gated": a.exclude, "skip_alerting": not a.no_skip_alerting},
+        "two_threshold": two,
         "thresholds_frozen": thr, "thresholds_sed_only": thr_sed, "allowed_false_alarms": anchor,
         "queue": {"running": 1, "max_wait": a.max_wait, "ttl_s": a.ttl_s,
                   "t_plan_sep_per_query_s": a.t_plan_sep, "t_plan_score_per_output_s": a.t_plan_score},
@@ -147,6 +173,10 @@ def main():
               f"--lo {a.lo:g} --exclude {' '.join(a.exclude) or ''} --ttl_s {a.ttl_s:g} --max_wait {a.max_wait} "
               f"--sed_s {a.sed_s:g}" + ("" if a.no_skip_alerting else " --skip_alerting"))
     sep, score = a.t_plan_sep, a.t_plan_score
+    if two:
+        print("Two-threshold design: compare the Pi run with heldout_eval.py's or two_threshold.py's scheduled "
+              "numbers for this set (schedule_sim.py models the single-threshold design only).")
+        return
     print("Predictions for this exact order (planned times; replace with the S4-measured times afterwards):")
     print(f"  core 3 scores outputs:     {common} --t_query {sep + score:.2f} --t_plan {sep + score:.2f}")
     print(f"  SED cores score outputs:   {common} --t_query {sep:.2f} --t_plan {sep:.2f} "
