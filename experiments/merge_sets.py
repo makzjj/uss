@@ -77,7 +77,9 @@ def main():
         w.writeheader()
         for rs in pieces.values():
             w.writerows(rs)
+    first = json.loads((Path(a.sets[0]) / "settings.json").read_text()) if (Path(a.sets[0]) / "settings.json").exists() else {}
     (out / "settings.json").write_text(json.dumps({
+        **{k: first[k] for k in ("duration_s", "sample_rate", "hop_s") if k in first},   # read by score_events.py
         "merged_from": [str(Path(x)) for x in a.sets], "target_set": "dev+dev_extra", "background_set": "dev",
         "clips": len(manifest), "shared_clips_kept_once": dupes,
         "note": "Combined development set for recalibration (option A); not independent evidence."}, indent=2))

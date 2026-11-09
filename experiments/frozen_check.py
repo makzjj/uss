@@ -28,7 +28,7 @@ from score_events import CONDITIONS, evaluate, in_window  # noqa: E402
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--test_set", required=True)
-    ap.add_argument("--frozen", default="results/gate1_v2_two_threshold.json")
+    ap.add_argument("--frozen", default="data_notes/frozen_design_v0_3_10.json")
     ap.add_argument("--onset_rel", type=float, default=0.5)
     ap.add_argument("--list_fa", action="store_true",
                     help="list every false alarm (SED alone and frozen design) and write a listening sheet CSV")
