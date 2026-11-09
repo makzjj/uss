@@ -1,0 +1,131 @@
+{
+  "summary": {
+    "design": "sed_cores",
+    "windows": 1225,
+    "jobs_submitted": 60,
+    "completed": 53,
+    "dropped": 7,
+    "expired": 0,
+    "outputs_scored": 53,
+    "outputs_late": 0,
+    "p1_s": {
+      "median": 2.5145,
+      "p95": 2.5814,
+      "p99": 2.634352,
+      "max": 2.6508
+    },
+    "sed_start_delay_ms": {
+      "p99": 0.24,
+      "max": 0.28
+    },
+    "alignment_max_abs_vs_server": 1.2000000000012001e-05,
+    "alignment_tolerance": 0.0001,
+    "temp_max_c": 45.277,
+    "throttled_seen": [
+      "throttled=0x0"
+    ],
+    "freq_min_mhz": 1800.0,
+    "mem_available_min_mb": 6200.60546875,
+    "freq_board_max_mhz": 1800.0,
+    "valid_run": true
+  },
+  "args": {
+    "score_on": "sed_cores",
+    "s4_dir": "s4_heldout",
+    "sed_onnx": "cnn14_fp32_pi.onnx",
+    "uss_onnx": "resunet30_at_soft_int8_v2.onnx",
+    "time_scale": 1.0,
+    "max_windows": 0,
+    "no_pin": false,
+    "test_sep_s": 0.0,
+    "allow_governor": false,
+    "cool_to_c": 60.0,
+    "min_free_mb": 1500.0
+  },
+  "config": {
+    "class_ids": {
+      "beeper": 319,
+      "engine": 343,
+      "jackhammer": 420
+    },
+    "gate": {
+      "policy": "kmax",
+      "lo": 0.1002,
+      "never_gated": [
+        "beeper"
+      ],
+      "skip_alerting": true
+    },
+    "two_threshold": {
+      "t1": {
+        "beeper": 0.17969,
+        "engine": 0.19305,
+        "jackhammer": 0.02801
+      },
+      "t2": {
+        "beeper": null,
+        "engine": null,
+        "jackhammer": 0.05703
+      },
+      "query_classes": [
+        "jackhammer"
+      ],
+      "frozen_file": "data_notes/frozen_design_v0_3_10.json",
+      "frozen_sha256": "b593e3c2a3b4c44b656dee059105f17f25c50b185cfb886b6358991c0f46b3ed"
+    },
+    "thresholds_frozen": {
+      "beeper": 0.17969,
+      "engine": 0.19305,
+      "jackhammer": 0.02801
+    },
+    "thresholds_sed_only": {
+      "beeper": 0.17969,
+      "engine": 0.19305,
+      "jackhammer": 0.02801
+    },
+    "allowed_false_alarms": {
+      "beeper": 2,
+      "engine": 4,
+      "jackhammer": 0
+    },
+    "queue": {
+      "running": 1,
+      "max_wait": 1,
+      "ttl_s": 60.0,
+      "t_plan_sep_per_query_s": 9.46,
+      "t_plan_score_per_output_s": 1.25
+    },
+    "score_outputs_on": "set per Pi run: core3 or sed_cores",
+    "note": "Frozen thresholds from FP32 USS + PyTorch SED; the Pi runs INT8 USS + ONNX SED.",
+    "sed_p95_s": 0.66,
+    "provenance": {
+      "test_set": "/home/zmak002/docker_share/test_audio/testsets/heldout_v1",
+      "scores_pieces": "results/heldout_v1_scores_pieces.csv",
+      "scores_sha256": "c1190e75a1225cf9f3d48817f5f98a8e78a8ec4753e9d7aa51baaf14b45097c2",
+      "order_seed": 2026
+    },
+    "stream": {
+      "file": "stream.flac",
+      "sample_rate": 32000,
+      "clip_s": 10.0,
+      "hop_s": 2.0,
+      "flac_subtype": "PCM_24",
+      "bit_exact": false
+    }
+  },
+  "time_scale": 1.0,
+  "hashes": {
+    "sed_onnx": "8b3ea03f579f6336e8e001423bd51d1725cd17758aaec7d454aaf9b5cd61b583",
+    "uss_onnx": "d3fad7b18a2f0006a7b194a7ccc994b22434e8b374d63c8b1b07f5fb440548df",
+    "stream": "a2d1237622dc6949097c9544e4b2a949af48e6e0d1a5b4063cfd2dc3f9c182a7",
+    "config": "dfd19c6abb6462b4ff6a5425488281132461208fbc4675e690188f0a2a62f5fe"
+  },
+  "versions": {
+    "onnxruntime": "1.31.1",
+    "python": "3.13.5"
+  },
+  "governor": [
+    "performance"
+  ],
+  "mem_before": "MemAvailable:    7597672 kB"
+}

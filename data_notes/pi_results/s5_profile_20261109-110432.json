@@ -1,0 +1,127 @@
+[
+  {
+    "model": "sed",
+    "file": "cnn14_fp32_pi.onnx",
+    "file_mb": 348.4,
+    "params": 87102735,
+    "threads": 2,
+    "cores": [
+      0,
+      1
+    ],
+    "runs": 20,
+    "median_s": 0.5265601414999992,
+    "p95_s": 0.5345664374499932,
+    "front_end_share": 0.057023632295356355,
+    "front_end_s_est": 0.030026371890286768,
+    "front_end_matched": true,
+    "profiled_runs": 10,
+    "top_operations": [
+      [
+        "/conv_block6/conv2/Conv",
+        0.0724
+      ],
+      [
+        "/conv_block4/conv2/Conv",
+        0.0538
+      ],
+      [
+        "/conv_block2/conv2/Conv",
+        0.0538
+      ],
+      [
+        "/conv_block3/conv2/Conv",
+        0.0534
+      ],
+      [
+        "/conv_block1/conv2/Conv",
+        0.0524
+      ],
+      [
+        "/conv_block5/conv2/Conv",
+        0.0517
+      ],
+      [
+        "/conv_block6/conv1/Conv",
+        0.0362
+      ],
+      [
+        "/conv_block4/conv1/Conv",
+        0.027
+      ]
+    ],
+    "cpu_cores_busy": 1.94,
+    "rss_before_mb": 20.0,
+    "peak_rss_mb": 1089.8,
+    "throttled": [
+      "throttled=0x0",
+      "throttled=0x0"
+    ],
+    "valid_run": true,
+    "governor": [
+      "performance"
+    ]
+  },
+  {
+    "model": "uss",
+    "file": "resunet30_at_soft_int8_v2.onnx",
+    "file_mb": 115.1,
+    "params": 43679433,
+    "threads": 1,
+    "cores": [
+      3
+    ],
+    "runs": 20,
+    "median_s": 8.545248255499985,
+    "p95_s": 8.551767929650037,
+    "front_end_share": 0.1017657231066387,
+    "front_end_s_est": 0.8696133678466988,
+    "front_end_matched": true,
+    "profiled_runs": 10,
+    "top_operations": [
+      [
+        "/model/base/decoder_block6/conv_block2/conv1/Conv_token_140",
+        0.458
+      ],
+      [
+        "/model/base/decoder_block5/conv_block2/conv1/Conv_token_128",
+        0.4316
+      ],
+      [
+        "/model/base/decoder_block4/conv_block2/conv1/Conv_token_116",
+        0.4305
+      ],
+      [
+        "/model/base/decoder_block3/conv_block2/conv1/Conv_token_104",
+        0.4155
+      ],
+      [
+        "/model/base/decoder_block6/conv_block2/conv2/Conv_token_144",
+        0.3459
+      ],
+      [
+        "/model/base/encoder_block1/conv_block1/conv2/Conv_token_12",
+        0.3427
+      ],
+      [
+        "/model/base/encoder_block1/conv_block1/conv1/Conv_token_8",
+        0.3394
+      ],
+      [
+        "/model/base/decoder_block2/conv_block2/conv1/Conv_token_92",
+        0.2391
+      ]
+    ],
+    "cpu_cores_busy": 1.0,
+    "rss_before_mb": 20.0,
+    "peak_rss_mb": 1096.7,
+    "throttled": [
+      "throttled=0x0",
+      "throttled=0x0"
+    ],
+    "valid_run": true,
+    "governor": [
+      "performance"
+    ]
+  }
+]
